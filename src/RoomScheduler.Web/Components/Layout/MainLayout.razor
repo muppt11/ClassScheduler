@@ -1,0 +1,34 @@
+@inherits LayoutComponentBase
+
+<div class="utbar">
+    <div class="utbar-inner">
+        <span class="wordmark">RoomScheduler</span>
+        <span class="unit">Classroom Assignment</span>
+    </div>
+</div>
+
+<nav class="utnav">
+    <div class="utnav-inner">
+        <NavLink href="" Match="NavLinkMatch.All">Schedule</NavLink>
+        <NavLink href="upload">Upload</NavLink>
+        <NavLink href="rooms">Rooms</NavLink>
+    </div>
+</nav>
+
+<div class="page">
+    <main>
+        @Body
+    </main>
+
+    <footer>
+        Room data from the UT Austin registrar classroom report, September 2026.
+        Past usage extracted from printed course schedules, 2022 to 2026.
+        A student project, not an official university system.
+    </footer>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Something went wrong.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">Close</span>
+</div>

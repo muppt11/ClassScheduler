@@ -1,0 +1,68 @@
+@page "/rooms"
+@rendermode InteractiveServer
+@inject SchedulingService Scheduling
+
+<PageTitle>Rooms</PageTitle>
+
+<h1>Rooms</h1>
+<p class="meta">General purpose classrooms available to the scheduler.</p>
+
+<div class="controls">
+    <label for="filter">Filter</label>
+    <input id="filter" placeholder="building or room" @bind="_filter" @bind:event="oninput" />
+    <span class="summary"><strong>@Filtered.Count()</strong> of @Scheduling.RoomCount rooms</span>
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>Building</th><th>Room</th><th class="num">Capacity</th>
+            <th>Departments that have taught here</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var room in Filtered.Take(300))
+        {
+            <tr>
+                <td class="mono">@room.Building</td>
+                <td class="mono">@room.RoomNumber</td>
+                <td class="num">@room.Capacity</td>
+                <td class="usage">
+                    @{
+                        var users = DepartmentsIn(room.Building).ToList();
+                    }
+                    @if (users.Count == 0)
+                    {
+                        <span class="dim">no record</span>
+                    }
+                    else
+                    {
+                        @string.Join("   ", users.Select(u => $"{u.Dept} {u.Count}"))
+                    }
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@if (Filtered.Count() > 300)
+{
+    <p class="empty">Showing the first 300. Narrow the filter to see more.</p>
+}
+
+@code {
+    private string _filter = "";
+
+    private IEnumerable<Room> Filtered =>
+        Scheduling.Rooms
+            .Where(r => string.IsNullOrWhiteSpace(_filter) ||
+                        $"{r.Building} {r.RoomNumber}".Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.Building)
+            .ThenBy(r => r.RoomNumber);
+
+    private IEnumerable<(string Dept, int Count)> DepartmentsIn(string building) =>
+        Scheduling.History.Departments
+            .Select(d => (Dept: d, Count: Scheduling.History.BuildingUsage(d, building)))
+            .Where(x => x.Count > 0)
+            .OrderByDescending(x => x.Count);
+}

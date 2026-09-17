@@ -1,0 +1,9 @@
+bin/
+obj/
+*.user
+.vs/
+
+# Playwright profile and scraped pages
+tools/.browser_profile/
+tools/saved_pages/
+tools/__pycache__/

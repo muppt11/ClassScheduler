@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RoomScheduler.Cli/RoomScheduler.Cli.csproj" />
+    <Project Path="src/RoomScheduler.Core/RoomScheduler.Core.csproj" />
+    <Project Path="src/RoomScheduler.Web/RoomScheduler.Web.csproj" />
+  </Folder>
+</Solution>
