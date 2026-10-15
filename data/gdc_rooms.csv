@@ -1,0 +1,20 @@
+room,capacity,type,in_gpc_list
+2.402,20,Project Lab,Y
+3.516,22,pod room,N
+4.516,22,pod room,N
+5.516,22,pod room,N
+6.516,22,pod room,N
+7.514,22,pod room,N
+2.212,26,project lab,N
+2.502,24,reconfigurable - chairs on wheels,Y
+2.410,28,reconfigurable - chairs on wheels,Y
+5.304,24,project lab,Y
+1.406,34,tiered,Y
+2.210,34,,Y
+6.202,35,electronic seminar room,Y
+4.302,48,,Y
+4.304,48,,Y
+5.302,62,regular,Y
+1.304,81,tiered,Y
+2.216,198,auditorium,Y
+2.506,27,,N

@@ -1,68 +1,137 @@
 @page "/rooms"
-@rendermode InteractiveServer
-@inject SchedulingService Scheduling
+@inject PlanningService Planning
 
 <PageTitle>Rooms</PageTitle>
 
 <h1>Rooms</h1>
-<p class="meta">General purpose classrooms available to the scheduler.</p>
+<p class="meta">
+    <b>@Planning.Rooms.Count</b> rooms from @Planning.RoomsSource,
+    <b>@Planning.Rooms.Count(r => r.LectureCapture)</b> with Lectures Online,
+    <b>@Planning.Rooms.Count(Offline)</b> offline.
+</p>
 
-<div class="controls">
-    <label for="filter">Filter</label>
-    <input id="filter" placeholder="building or room" @bind="_filter" @bind:event="oninput" />
-    <span class="summary"><strong>@Filtered.Count()</strong> of @Scheduling.RoomCount rooms</span>
+<h2>Offline</h2>
+<p class="explain">
+    Check a building to take every room in it offline, or open it to pick single rooms.
+    The scheduler never puts a class in an offline room.
+</p>
+
+@if (_changed)
+{
+    <div class="problems">Offline rooms changed. Rebuild the schedule on the Semester plan page to apply.</div>
+}
+
+<div class="offline">
+    @foreach (var b in Buildings())
+    {
+        var rooms = RoomsIn(b);
+        int off = rooms.Count(Offline);
+        bool whole = Planning.Rules.Offline.BuildingOffline(b);
+        <div class="bldg @(off > 0 ? "has-off" : "")">
+            <div class="bldg-head">
+                <label class="inline">
+                    <input type="checkbox" checked="@whole" @onchange="e => SetBuilding(b, (bool)e.Value!)" />
+                    <b class="mono">@b</b>
+                    <span class="dim">@Planning.Campus.Names.GetValueOrDefault(b, "")</span>
+                </label>
+                <span class="summary">
+                    @(off == 0 ? $"{rooms.Count} rooms" : off == rooms.Count ? $"all {rooms.Count} offline" : $"{off} of {rooms.Count} offline")
+                </span>
+                <button class="ghost small" @onclick="() => Toggle(b)">@(_open.Contains(b) ? "hide rooms" : "rooms")</button>
+            </div>
+            @if (_open.Contains(b))
+            {
+                <div class="bldg-rooms">
+                    @foreach (var r in rooms)
+                    {
+                        <label class="inline">
+                            <input type="checkbox" checked="@Offline(r)" @onchange="e => SetRoom(r, (bool)e.Value!)" />
+                            <span class="mono">@r.RoomNumber</span> <span class="dim">(@r.Capacity)</span>
+                        </label>
+                    }
+                </div>
+            }
+        </div>
+    }
 </div>
 
-<table>
+<h2>All rooms</h2>
+<div class="controls">
+    <label for="filter">Filter</label>
+    <input id="filter" placeholder="building, room or feature" @bind="_filter" @bind:event="oninput" />
+    <label class="inline"><input type="checkbox" @bind="_onlyUsed" /> only rooms in the current schedule</label>
+    <span class="summary"><strong>@Filtered().Count()</strong> rooms</span>
+</div>
+
+<div class="tablewrap">
+<table class="plan-table">
     <thead>
         <tr>
-            <th>Building</th><th>Room</th><th class="num">Capacity</th>
-            <th>Departments that have taught here</th>
+            <th>Room</th><th class="num">Capacity</th><th>Features</th><th>Lectures Online</th>
+            <th>Status</th><th class="num" title="Classes in the current schedule">Classes</th>
+            <th class="num" title="Times CS taught here in the 2022-2026 printed catalogs">CS history</th><th>Notes</th>
         </tr>
     </thead>
     <tbody>
-        @foreach (var room in Filtered.Take(300))
+        @foreach (var r in Filtered())
         {
-            <tr>
-                <td class="mono">@room.Building</td>
-                <td class="mono">@room.RoomNumber</td>
-                <td class="num">@room.Capacity</td>
-                <td class="usage">
-                    @{
-                        var users = DepartmentsIn(room.Building).ToList();
-                    }
-                    @if (users.Count == 0)
-                    {
-                        <span class="dim">no record</span>
-                    }
-                    else
-                    {
-                        @string.Join("   ", users.Select(u => $"{u.Dept} {u.Count}"))
-                    }
-                </td>
+            int classes = Planning.LatestPlan?.InRoom(r).Count ?? 0;
+            <tr class="@(Offline(r) ? "row-off" : "")">
+                <td class="mono nowrap">@(classes > 0 ? PlanExport.UsedMark : "")@r.DisplayName</td>
+                <td class="num">@r.Capacity</td>
+                <td class="mono">@string.Join(" ", r.Features.OrderBy(f => f))</td>
+                <td>@(r.LectureCapture ? "yes" : "")</td>
+                <td>@(Offline(r) ? "offline" : r.NonStandard ? "avoid (NSC)" : r.DepartmentOnly ? "CS only" : "")</td>
+                <td class="num">@(classes > 0 ? classes : "")</td>
+                <td class="num">@(Planning.DepartmentHistory.BuildingUsage(Planning.Rules.Department, r.Building) is int n && n > 0 ? n : "")</td>
+                <td class="dim">@r.Notes</td>
             </tr>
         }
     </tbody>
 </table>
+</div>
 
-@if (Filtered.Count() > 300)
-{
-    <p class="empty">Showing the first 300. Narrow the filter to see more.</p>
-}
+<p class="hint">
+    Features: CWS continuous writing surface, Wb whiteboard, Gb glass board, Bb blackboard, MC movable chairs,
+    TBL movable tables, SEM seminar room, DP dual projector, LM limited media, CON media console,
+    NSC non-standard classroom (avoided).
+</p>
 
 @code {
     private string _filter = "";
+    private bool _onlyUsed;
+    private bool _changed;
+    private readonly HashSet<string> _open = new();
 
-    private IEnumerable<Room> Filtered =>
-        Scheduling.Rooms
-            .Where(r => string.IsNullOrWhiteSpace(_filter) ||
-                        $"{r.Building} {r.RoomNumber}".Contains(_filter, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(r => r.Building)
-            .ThenBy(r => r.RoomNumber);
+    private bool Offline(Room r) => Planning.Rules.Offline.IsOffline(r);
 
-    private IEnumerable<(string Dept, int Count)> DepartmentsIn(string building) =>
-        Scheduling.History.Departments
-            .Select(d => (Dept: d, Count: Scheduling.History.BuildingUsage(d, building)))
-            .Where(x => x.Count > 0)
-            .OrderByDescending(x => x.Count);
+    private IEnumerable<string> Buildings() =>
+        Planning.Rooms.Select(r => r.Building).Distinct().OrderBy(b => b);
+
+    private List<Room> RoomsIn(string b) =>
+        Planning.Rooms.Where(r => r.Building == b).OrderBy(r => r.RoomNumber).ToList();
+
+    private void Toggle(string b)
+    {
+        if (!_open.Remove(b)) _open.Add(b);
+    }
+
+    private void SetBuilding(string b, bool offline)
+    {
+        Planning.Rules.Offline.SetBuilding(b, offline, Planning.Rooms);
+        _changed = true;
+    }
+
+    private void SetRoom(Room r, bool offline)
+    {
+        Planning.Rules.Offline.SetRoom(r, offline, Planning.Rooms);
+        _changed = true;
+    }
+
+    private IEnumerable<Room> Filtered() =>
+        Planning.Rooms
+            .Where(r => !_onlyUsed || (Planning.LatestPlan?.InRoom(r).Count ?? 0) > 0)
+            .Where(r => _filter.Length == 0 ||
+                        $"{r.DisplayName} {string.Join(" ", r.Features)} {r.Notes}".Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.Building).ThenBy(r => r.RoomNumber);
 }

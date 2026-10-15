@@ -1,53 +1,141 @@
 # RoomScheduler
 
-A C# app that assigns university classes to classrooms and flags the ones it cannot
-place. It includes 246 general purpose classrooms from the UT Austin
-registrar report for September 2026. The courses are generated, but I copied the
-meeting patterns and time formats from real printed course schedules.
+Builds the UT Austin CS department's semester schedule from the department's own
+spreadsheets. It picks a time and a room for every section, follows the department's
+rules, fills in the blank fields on the Classes App sheet, and lists what a person should
+check. There's also a console version.
 
-It runs two ways, as a console app and as a Blazor Server web app, both on the same
-scheduling library.
+## Open it
 
-![The generated schedule page](docs/schedule.png)
+**https://muppt11.github.io/ClassScheduler/**
 
-## How the scheduling works
+The whole app runs inside your browser. Spreadsheets you add are read in the browser and
+saved in its local storage, so they stay on your computer and are never uploaded anywhere.
+They're still there next time you open the page in the same browser. Each push to `main`
+republishes the site (`.github/workflows/pages.yml`).
 
-Courses are sorted by enrollment, biggest first, because large classes have the
-fewest rooms that can hold them. Each course then takes the best available room,
-scored two ways. Every wasted seat costs a point, so a class normally lands in the
-smallest room that fits. A building the department has taught in before earns a
-bonus, capped so a small class never gets pushed into a lecture hall just to stay in
-a familiar building.
+To run it locally instead, install the [.NET 10 SDK](https://dotnet.microsoft.com/download),
+run `dotnet run --project src/RoomScheduler.Web`, and open the address it prints.
 
-A room is unavailable if something already booked there shares a meeting day and
-overlaps in time. An MWF section holds its room on all three days. Anything that
-cannot be placed goes on an unplaced list rather than crashing, and the app says why
-it picked each room.
+## Each semester
 
-## Running it
+1. **Semester plan → Files → Add files.** Upload the new Classes App + preference workbook.
+   Also add each finished semester's actual schedule (the registrar export with CNBR,
+   DAYS1, BLDG1...) and a new rooms table if the registrar sends one. The app works out
+   which file is which and keeps them in this browser for next time. All past schedules are used as
+   history; the newest counts as "last time".
+2. **Rooms → Offline.** Check any building or room that's off limits. CPE starts checked.
+3. **Faculty.** The track list sets each professor to tenure (T) or professional (P) and
+   marks difficult faculty (D). Each profile also holds times someone can't teach,
+   accommodations and complaints. On the schedule, the **D** and **T**/**P** buttons do the same.
+4. **Build schedule.** Then work through the **Review queue** (problems first).
+   **Rebuild** after changing faculty or offline rooms.
+5. **Download workbook.** It contains:
+   - the Classes App sheet with blanks filled in (highlighted), plus the registrar cap and fit
+   - the review queue
+   - a registrar sheet
+   - finals and proctors (exam times and rooms are TBD)
+   - a weekly calendar for every room in use plus the GDC rooms, in the Gates template
+     layout. Used rooms come first, marked ● with a green tab, after an index sheet
 
-```
-dotnet run --project src/RoomScheduler.Web
-```
+## The rules
 
-Then open the address it prints, usually http://localhost:5187.
+**Order.** Difficult faculty first, then tenure track, then professional track. Track comes
+from the "Tenure or PTF" column, or the Faculty page if set there.
 
-```
-dotnet run --project src/RoomScheduler.Cli 50
-```
+**Times.**
+- Each section tries the professor's ranked choices.
+- The notes ("Time other") are read too. When they say the choices were placeholders, or
+  all three choices are the same, the notes come first.
+- "Friday any time between 9am-4pm" becomes every 3-hour slot in that window.
+- No form: the time they taught that course last time.
+- A new instructor with no form and no history is flagged for someone to reach out.
 
-The console version takes an optional number for how many sections to generate.
-`dotnet build` builds everything.
+**Never broken.**
+- Tenure-track faculty get nothing overlapping Mon or Wed 12-1 (faculty lunch), even if asked.
+- TTH 11-12:30 is held for graduate courses (middle digit 8 or 9, like 381B or 395T). A
+  tenure-track professor who teaches one can't have their other classes then.
+- No class goes in an offline building or room.
+- Times a professor wrote they can't do ("not Wed noon-1PM") and anything on their
+  profile (unavailable times, accommodations) are respected.
+- No room or instructor is double booked.
 
-## The data
+**Rooms.** Points go up for:
+- rooms, buildings or floors they asked for
+- the room they had last time
+- buildings CS used in the 2022-2026 catalogs
+- rooms on the Lectures Online list, when they asked for recording
+- being close to GDC (strongly when they asked to be near it)
 
-| Source | What it gives |
+Points go down for:
+- buildings they asked to avoid
+- missing requested features
+- non-standard classrooms (NSC)
+- long walks between a professor's back-to-back classes: under 5 minutes is ideal, under
+  10 is fine, and longer is flagged
+
+Before 12:30, CS's four big GDC rooms need the registrar's agreement, so those bookings are marked.
+
+**Class size.**
+- The size reported to the registrar is room capacity minus 10%. It's kept close to the
+  expected class size.
+- Normal is under 50% over; Min high is 50-75% over; Max high is over 75%, and is flagged.
+  A room more than 10% too small is also flagged.
+- A class whose last enrollment was well under its projected size is downsized 15% and flagged.
+- After everything is placed, a clean-up pass moves sections into better rooms that turned out to be free.
+
+**Flagged as possible inaccuracies.**
+- A time that contradicts the professor's own note.
+- Hours that don't match the course's credit hours (439 is 4 credits, so 4 hours a week).
+- "Same as last year" when the record says otherwise.
+- A room that doesn't exist.
+- A graduate course with a professional-track instructor.
+
+Cross-listing, textbook requests and other free-text notes go to the review queue.
+
+## Known gaps
+
+- **Discussion sections** are phase two, after the lecture schedule is approved. The code is
+  there and switched off (`ScheduleDiscussions` in `SchedulingRules.cs`).
+- **Final exams** are TBD.
+- **Only Fall 2025 history so far.** Add older semesters through Files to improve the
+  "last time" fallback and the checks.
+- **No moving a single class by hand in the app.** Change it in the downloaded workbook,
+  or change the request and rebuild.
+- **Building distances are estimates**, from the registrar's GPC map at roughly 1.9 m per
+  pixel (`data/buildings.csv`). EER isn't on that map; its position comes from its label.
+- **One browser.** Files, profiles and offline rooms are saved in the browser you use. A
+  different computer or browser starts empty, and clearing site data erases them.
+- **Speed.** Building runs in the browser and takes a few seconds or more.
+
+## Where things live
+
+| Path | What |
 |---|---|
-| Registrar classroom report, September 2026 | 246 rooms in 29 buildings, with capacities |
-| Printed course schedules, 2022 to 2026 | 218 past sections across 7 departments |
+| `data/private/` | department spreadsheets for the console version (gitignored) |
+| `data/gpc_rooms_features.csv` | built-in rooms table |
+| `data/gdc_rooms.csv` | GDC rooms from the Gates template |
+| `data/lecture_capture_rooms.csv` | Lectures Online rooms |
+| `data/buildings.csv` | building positions for walking distances |
+| `data/course_history.csv` | buildings each department used, 2022-2026 catalogs |
+| `src/RoomScheduler.Core/Planning/SchedulingRules.cs` | thresholds and policies in one place |
 
-The past sections came out of 18 scanned catalog pages. They are used to learn which
-buildings each department actually teaches in.
+**Privacy.** The department sheets have EIDs, emails and private comments, and this repo
+and its website are public. The website only reads them inside the browser, and the
+console version reads them from `data/private/`, which is never committed.
+
+## Console version and testing
+
+```
+dotnet run --project src/RoomScheduler.Cli data/private/fall26_requests.xlsx \
+    --history data/private/fall25_actual.xlsx --out fall26.xlsx --list --flags
+```
+
+`--compare actual.xlsx` scores a plan against what really ran. On the Fall 2025 requests
+(with no history, since there is no Fall 2024 file), it picks the same time as the real
+schedule for 67% of sections and the same building for 51%. Most misses are places where
+the request was changed by hand. Every run also checks itself for double bookings and
+broken lunch rules.
 
 ## What I learned
 
@@ -72,58 +160,17 @@ mistakes matter less.
 courses from 77 to 90 out of 600, because everything crowds into the same few
 buildings. I kept it because the picks look more realistic.
 
-## Limitations
-
-The courses are made up. The patterns are real, but the classes are not.
-
-There's much more class history that's not included in here. There are 218 sections over seven departments, and architecture is about
-half of it. The other five pages are one semester each, so there is no repeat pattern
-in them.
-
-The preference only works for four of the seven departments. Architecture and
-communication teach in buildings my room list does not include.
-
-OCR still gets things wrong. About 2 records in 223 have unreadable times. I flag
-those instead of dropping them so I can check them later.
-
-Nothing saves between runs. The scheduler also redoes everything from scratch, so it
-cannot add one course to a schedule that already exists.
-
-## What I want to add
-
-Add the departmental classrooms to the room list. Doubles the rooms and would make
-the history work for all seven departments instead of four.
-
-Let professors request a room. Needs a database, a pending and approved status, and a
-scheduler that can place one course without redoing the rest. This is the big missing
-piece.
-
-Use more than the building. The professor level pattern is already in my data. Dudley
-T shows up in 10 of the 13 architecture terms.
-
-Pull more schedule pages to cover more departments.
-
 ## Layout
 
 ```
-src/RoomScheduler.Core   the scheduling logic, no UI, used by both apps
-  Room.cs                loads rooms, removes duplicate entries
-  Course.cs              a section, its meeting days and time formats
-  Scheduler.cs           assignment, conflict detection, course generation
-  CourseHistory.cs       past building usage per department
-  CourseCsv.cs           reads an uploaded course list, loose column matching
-  Csv.cs                 shared CSV line parser
-  DataFile.cs            finds data files from either working directory
-
-src/RoomScheduler.Cli    console version
-src/RoomScheduler.Web    Blazor Server front end
-  Schedule page          generate sections and see why each room was picked
-  Upload page            drop in a course CSV and schedule it
-  Rooms page             browse rooms and which departments have used them
-
-data/                    extracted course history
-tools/                   PDF extraction and schedule page collection scripts
-class schedule resources/   the original scanned catalog and room report PDFs
+src/RoomScheduler.Core     scheduling logic, no UI
+  Planning/                planner, preference parsing, rules, exports, faculty profiles,
+                           offline rooms, past schedules, campus distances
+  Xlsx.cs                  reads and writes .xlsx without a NuGet package
+  Room.cs, CourseHistory.cs, Csv.cs, DataFile.cs
+src/RoomScheduler.Web      the website (Blazor WebAssembly): Semester plan, Faculty, Rooms
+src/RoomScheduler.Cli      console version
+tools/, class schedule resources/   how course_history.csv was made from scanned catalogs
 ```
 
 A student project. Not an official university system.

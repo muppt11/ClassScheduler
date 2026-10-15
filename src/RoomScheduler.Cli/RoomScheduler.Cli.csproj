@@ -15,10 +15,6 @@
 
   <ItemGroup>
     <!-- Data lives at the repo root and is copied next to the built app. -->
-    <None Include="..\..\Sept2026_Classroom-Types_Rooms_Report.csv"
-          Link="Sept2026_Classroom-Types_Rooms_Report.csv">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Include="..\..\data\course_history.csv" Link="data\course_history.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

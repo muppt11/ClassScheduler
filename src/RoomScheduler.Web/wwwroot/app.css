@@ -258,3 +258,158 @@ footer {
 
 .explain a { color: var(--link); }
 
+
+/* semester plan */
+
+select { border: 1px solid #9a9a9a; padding: 3px 4px; font: inherit; font-size: 12px; background: #fff; }
+
+.stats {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 18px;
+    font-size: 12px;
+    color: var(--dim);
+    margin: 4px 0 14px;
+}
+.stats strong { color: var(--ink); font-size: 16px; margin-right: 3px; }
+.stats .bad strong { color: #b42318; }
+.stats .mid strong { color: var(--warn); }
+.stats .right { margin-left: auto; display: flex; gap: 6px; }
+
+.tabs { display: flex; gap: 2px; border-bottom: 2px solid var(--orange); margin: 6px 0 12px; }
+.tabs .tab {
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-bottom: 0;
+    font-weight: normal;
+}
+.tabs .tab.on { background: var(--orange); border-color: var(--orange); color: #fff; font-weight: 700; }
+
+.fit.max { color: #b42318; font-weight: 700; }
+.fit.min { color: var(--warn); }
+tr.row-bad td { background: #fdecea; }
+.why-cell { color: var(--faint); white-space: normal; }
+.flagcount {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: #fff2cc;
+    color: var(--warn);
+    font-size: 11px;
+    cursor: help;
+}
+
+table.grid td { border: 1px solid var(--hairline); width: 19%; height: 18px; padding: 2px 6px; white-space: normal; vertical-align: top; }
+table.grid td:first-child { width: 70px; white-space: nowrap; }
+table.grid td.busy { font-size: 11px; }
+table.grid tbody tr:nth-child(even) { background: transparent; }
+
+/* faculty */
+
+.faculty { display: grid; grid-template-columns: 240px 1fr; gap: 22px; align-items: start; }
+.faculty .list { display: flex; flex-direction: column; gap: 2px; max-height: 75vh; overflow-y: auto; }
+.faculty .list input { width: 100%; margin-bottom: 6px; }
+.person {
+    background: #fff;
+    color: var(--ink);
+    border: 1px solid transparent;
+    text-align: left;
+    font-weight: normal;
+    display: flex;
+    justify-content: space-between;
+}
+.person:hover { background: var(--panel); }
+.person.on { border-color: var(--orange); background: #fdf3ea; }
+.tags { color: var(--faint); display: flex; gap: 4px; }
+.tag { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 0 4px; font-size: 10px; }
+.tag.d { background: #f8d7da; border-color: #e5a3a9; color: #8a1c25; }
+
+.profile .form { display: grid; grid-template-columns: 170px 1fr; gap: 12px 14px; margin: 14px 0; font-size: 12px; }
+.profile .form > label { font-weight: 700; padding-top: 4px; }
+.profile .inline { display: block; margin-bottom: 6px; }
+.profile textarea { width: 100%; max-width: 620px; font: inherit; font-size: 12px; border: 1px solid #9a9a9a; padding: 4px 6px; }
+.profile input.wide { width: 100%; max-width: 620px; }
+.hint { color: var(--faint); font-size: 11px; margin-top: 3px; }
+.complaint { margin-bottom: 4px; }
+.complaint .small, button.small { padding: 0 6px; font-size: 11px; margin-left: 6px; }
+.add { display: flex; gap: 6px; margin-top: 6px; }
+
+@media (max-width: 760px) {
+    .faculty { grid-template-columns: 1fr; }
+    .profile .form { grid-template-columns: 1fr; }
+}
+
+.nowrap { white-space: nowrap; }
+.dtoggle {
+    background: #fff;
+    color: var(--faint);
+    border: 1px solid var(--line);
+    padding: 0 5px;
+    font-size: 11px;
+    margin-right: 4px;
+}
+.dtoggle:hover { background: #fdf3ea; color: var(--ink); }
+.dtoggle.on { background: #f8d7da; border-color: #e5a3a9; color: #8a1c25; }
+
+/* file library */
+
+.files { border: 1px solid var(--line); background: #fcfcfc; padding: 4px 14px 2px; margin: 4px 0 18px; }
+.files-head { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.files-head h2 { border: 0; margin: 10px 0 4px; }
+.files .controls { background: transparent; border: 0; padding: 8px 0; margin: 0; }
+table.filetable { margin: 4px 0 6px; }
+table.filetable tr.chosen td { background: #fdf3ea; }
+
+/* schedule table: fit the page, wrap long text, scroll inside the page if still too wide */
+
+.page { max-width: 1480px; }
+.utbar-inner, .utnav-inner { max-width: 1480px; }
+
+.tablewrap { width: 100%; overflow-x: auto; }
+
+table.plan-table td, table.plan-table th { padding: 5px 8px 5px 6px; vertical-align: top; }
+table.plan-table tbody td { white-space: normal; }
+table.plan-table tbody td.nowrap { white-space: nowrap; }
+table.plan-table thead th:last-child, table.plan-table tbody td:last-child { width: auto; }
+table.plan-table td.course { min-width: 150px; max-width: 230px; }
+table.plan-table td.instructor { min-width: 90px; max-width: 140px; }
+table.plan-table td.why-cell { min-width: 260px; font-size: 11.5px; line-height: 1.4; }
+table.plan-table th.num, table.plan-table td.num { padding-right: 10px; }
+table.plan-table .sub { color: var(--faint); font-size: 11px; margin-top: 1px; }
+table.plan-table tbody tr:nth-child(even) td { background: var(--stripe); }
+table.plan-table tbody tr.row-bad td { background: #fdecea; }
+
+table.filetable td { white-space: normal; }
+table.filetable thead th:last-child, table.filetable tbody td:last-child { width: auto; }
+
+@media (max-width: 1100px) {
+    .page { padding: 18px 14px 30px; }
+    table.plan-table td.why-cell { min-width: 200px; }
+}
+
+.problems.rebuild { display: flex; align-items: center; gap: 12px; }
+
+/* offline rooms */
+
+.offline { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 6px 14px; margin-bottom: 18px; }
+.bldg { border: 1px solid var(--hairline); padding: 5px 8px; font-size: 12px; }
+.bldg.has-off { border-color: #e5a3a9; background: #fdf3f3; }
+.bldg-head { display: flex; align-items: center; gap: 8px; }
+.bldg-head label { flex: 1; margin: 0; }
+.bldg-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)); gap: 2px 8px; padding: 6px 0 2px 22px; }
+.bldg-rooms label { margin: 0; }
+table.plan-table tbody tr.row-off td { color: var(--faint); text-decoration: line-through; }
+
+.loading { max-width: 1480px; margin: 60px auto; text-align: center; color: var(--dim); font-size: 14px; }
+#blazor-error-ui .reload { color: var(--link); }
+
+/* track list */
+
+.tracklist { margin: 4px 0 18px; }
+.tracklist summary { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+table.tracktable { max-width: 520px; margin-top: 6px; }
+table.tracktable td:not(:first-child), table.tracktable th:not(:first-child) { text-align: center; width: 50px; }
+.dtoggle.track { color: var(--ink); }

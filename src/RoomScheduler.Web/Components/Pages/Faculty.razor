@@ -1,0 +1,225 @@
+@page "/faculty"
+@inject PlanningService Planning
+@inject NavigationManager Nav
+
+<PageTitle>Faculty</PageTitle>
+
+<h1>Faculty</h1>
+
+@if (Planning.Faculty.All.Any())
+{
+    <details class="tracklist" open="@_trackListOpen">
+        <summary @onclick="() => _trackListOpen = !_trackListOpen">Track list: tenure (T) or professional (P), and difficult (D)</summary>
+        @if (_trackChanged)
+        {
+            <div class="problems rebuild">
+                Changed. Rebuild the schedule to apply.
+                @if (Planning.LatestPlan != null)
+                {
+                    <button @onclick="RebuildAndShow" disabled="@_busy">@(_busy ? "Working" : "Rebuild now")</button>
+                }
+            </div>
+        }
+        <table class="plan-table tracktable">
+            <thead><tr><th>Instructor</th><th>T</th><th>P</th><th>D</th></tr></thead>
+            <tbody>
+                @foreach (var f in Planning.Faculty.All)
+                {
+                    <tr>
+                        <td>@f.DisplayName</td>
+                        <td><input type="radio" name="@("track-" + f.Surname)" checked="@(f.Track == FacultyTrack.Tenure)"
+                                   @onchange="() => SetTrack(f, FacultyTrack.Tenure)" title="Tenure track" /></td>
+                        <td><input type="radio" name="@("track-" + f.Surname)" checked="@(f.Track == FacultyTrack.Professional)"
+                                   @onchange="() => SetTrack(f, FacultyTrack.Professional)" title="Professional track" /></td>
+                        <td><input type="checkbox" checked="@f.Difficult"
+                                   @onchange="e => SetDifficult(f, (bool)e.Value!)" title="Difficult: scheduled first" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </details>
+}
+
+<div class="faculty">
+    <div class="list">
+        <input placeholder="search" @bind="_search" @bind:event="oninput" />
+        @foreach (var p in Planning.Faculty.All.Where(p => _search.Length == 0 ||
+                     p.DisplayName.Contains(_search, StringComparison.OrdinalIgnoreCase)))
+        {
+            <button class="@(_selected == p ? "person on" : "person")" @onclick="() => Select(p)">
+                @p.DisplayName
+                <span class="tags">
+                    @if (p.Difficult) { <span class="tag d">D</span> }
+                    @(p.Track == FacultyTrack.Tenure ? "T" : p.Track == FacultyTrack.Professional ? "P" : "")
+                    @if (p.HasAccommodations) { <span class="tag">acc</span> }
+                    @if (p.Complaints.Count > 0) { <span class="tag">@p.Complaints.Count</span> }
+                </span>
+            </button>
+        }
+        @if (!Planning.Faculty.All.Any())
+        {
+            <p class="empty">No profiles yet. Build a schedule on the Semester plan page first.</p>
+        }
+    </div>
+
+    @if (_selected != null)
+    {
+        var p = _selected;
+        <div class="profile">
+            <h2>@p.DisplayName</h2>
+
+            <div class="form">
+                <label>Priority</label>
+                <div>
+                    <label class="inline"><input type="checkbox" @bind="p.Difficult" /> Difficult (D): schedule first</label>
+                </div>
+
+                <label for="track">Track</label>
+                <select id="track" @bind="p.Track">
+                    <option value="@FacultyTrack.Unknown">unknown</option>
+                    <option value="@FacultyTrack.Tenure">Tenure / tenure track (T)</option>
+                    <option value="@FacultyTrack.Professional">Professional track (P)</option>
+                </select>
+
+                <label for="unav">Unavailable</label>
+                <div>
+                    <input id="unav" class="wide" placeholder="e.g. TTH 8:00-9:30; F 1:00-5:00" @bind="p.Unavailable" @bind:event="oninput" />
+                    <div class="hint">
+                        @if (p.Unavailable.Trim().Length > 0)
+                        {
+                            var times = p.UnavailableTimes();
+                            @(times.Count == 0 ? "Could not read that. Use days then a time range." : "Reads as: " + string.Join(", ", times))
+                        }
+                        else
+                        {
+                            @("Family, another job, or anything else outside the department. Separate entries with ;")
+                        }
+                    </div>
+                </div>
+
+                <label for="ext">Outside situation</label>
+                <textarea id="ext" rows="2" @bind="p.ExternalNotes" placeholder="Why, for whoever reads this next. Not used by the scheduler."></textarea>
+
+                <label>Accommodations</label>
+                <div>
+                    <label class="inline"><input type="checkbox" @bind="p.GroundFloorOnly" /> Ground floor or basement only</label>
+                    <label class="inline">
+                        Longest walk between back-to-back classes
+                        <input type="number" min="0" max="30" @bind="p.MaxWalkMinutes" /> min
+                    </label>
+                    <label class="inline">
+                        Room must have
+                        <input placeholder="e.g. CWS Wb" @bind="p.RequiredFeatures" />
+                    </label>
+                    <textarea rows="2" @bind="p.AccommodationNotes" placeholder="Notes (shown on the review queue)"></textarea>
+                    <div class="hint">Feature codes: CWS continuous writing surface, Wb whiteboard, Gb glass board, Bb blackboard, MC movable chairs, TBL movable tables, SEM seminar room, DP dual projector, LM limited media, CON media console (nearly every room). NSC rooms (non-standard) are avoided.</div>
+                </div>
+
+                <label>Complaints</label>
+                <div>
+                    @foreach (var c in p.Complaints.OrderByDescending(c => c.Date))
+                    {
+                        <div class="complaint">
+                            <span class="dim mono">@c.Date.ToString("yyyy-MM-dd")</span> @c.Text
+                            <button class="ghost small" @onclick="() => p.Complaints.Remove(c)">remove</button>
+                        </div>
+                    }
+                    <div class="add">
+                        <input class="wide" placeholder="Add a complaint or room issue" @bind="_newComplaint" />
+                        <button class="ghost" @onclick="AddComplaint" disabled="@(_newComplaint.Trim().Length == 0)">Add</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button @onclick="Save">Save profile</button>
+                @if (_saved && Planning.LatestPlan != null)
+                {
+                    <span class="summary">Saved.</span>
+                    <button class="ghost" @onclick="RebuildAndShow" disabled="@_busy">@(_busy ? "Working" : "Rebuild schedule")</button>
+                }
+                else if (_saved)
+                {
+                    <span class="summary">Saved. Build a schedule on the Semester plan page to use it.</span>
+                }
+            </div>
+
+            @{
+                var sections = Planning.LatestPlan?.Placements.Where(x => x.Section.Surname == p.Surname).ToList();
+            }
+            @if (sections?.Count > 0)
+            {
+                <h2>In the current plan</h2>
+                <table>
+                    <tbody>
+                        @foreach (var x in sections)
+                        {
+                            <tr>
+                                <td class="mono">@x.Section.Title</td>
+                                <td class="mono">@x.Time</td>
+                                <td class="mono">@x.Room?.DisplayName</td>
+                                <td>@string.Join("; ", x.Section.Flags.Where(f => f.Level != FlagLevel.Info).Select(f => f.Message))</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string _search = "";
+    private FacultyProfile? _selected;
+    private string _newComplaint = "";
+    private bool _saved;
+
+    private void Select(FacultyProfile p)
+    {
+        _selected = p;
+        _saved = false;
+        _newComplaint = "";
+    }
+
+    private void AddComplaint()
+    {
+        _selected!.Complaints.Add(new Complaint { Date = DateTime.Today, Text = _newComplaint.Trim() });
+        _newComplaint = "";
+        Save();
+    }
+
+    private bool _busy;
+    private bool _trackListOpen = true;
+    private bool _trackChanged;
+
+    private void SetTrack(FacultyProfile f, FacultyTrack track)
+    {
+        f.Track = track;
+        Planning.Faculty.Save();
+        _trackChanged = true;
+    }
+
+    private void SetDifficult(FacultyProfile f, bool difficult)
+    {
+        f.Difficult = difficult;
+        Planning.Faculty.Save();
+        _trackChanged = true;
+    }
+
+    /// <summary>Reruns the last schedule with the saved profiles, then shows it.</summary>
+    private async Task RebuildAndShow()
+    {
+        _busy = true;
+        StateHasChanged();
+        await Task.Delay(50);
+        Planning.Build(Planning.LatestSource);
+        _busy = false;
+        Nav.NavigateTo("");
+    }
+
+    private void Save()
+    {
+        Planning.Faculty.Save();
+        _saved = true;
+    }
+}

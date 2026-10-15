@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RoomScheduler</title>
+    <!-- The GitHub Pages build rewrites this to the repository path. -->
+    <base href="/" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="RoomScheduler.Web.styles.css" />
+</head>
+
+<body>
+    <div id="app">
+        <div class="loading">Loading RoomScheduler…</div>
+    </div>
+
+    <div id="blazor-error-ui">
+        Something went wrong.
+        <a href="" class="reload">Reload</a>
+        <span class="dismiss">Close</span>
+    </div>
+
+    <script>
+        // Saves bytes from the app as a file, used for spreadsheet exports.
+        window.saveFile = (name, base64) => {
+            const link = document.createElement("a");
+            link.href = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + base64;
+            link.download = name;
+            link.click();
+        };
+    </script>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+
+</html>

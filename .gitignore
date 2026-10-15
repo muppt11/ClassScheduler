@@ -7,3 +7,7 @@ obj/
 tools/.browser_profile/
 tools/saved_pages/
 tools/__pycache__/
+
+# Real scheduling data from the department (names, EIDs, private comments). Never commit.
+data/private/
+data/local/

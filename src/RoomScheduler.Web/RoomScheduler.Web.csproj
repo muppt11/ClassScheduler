@@ -1,26 +1,27 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>RoomScheduler.Web</RootNamespace>
-    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.12" PrivateAssets="all" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\RoomScheduler.Core\RoomScheduler.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Data lives at the repo root and is copied next to the built app. -->
-    <None Include="..\..\Sept2026_Classroom-Types_Rooms_Report.csv"
-          Link="Sept2026_Classroom-Types_Rooms_Report.csv">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="..\..\data\course_history.csv" Link="data\course_history.csv">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <!-- The public data files (rooms, buildings, history) are served next to the
+         app, which downloads them at startup. data/private is never included. -->
+    <Content Include="..\..\data\*.csv" Link="wwwroot\data\%(Filename)%(Extension)">
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

@@ -28,18 +28,12 @@ namespace RoomScheduler
         /// <summary>An empty history. Scheduling still works, just without the preference.</summary>
         public static CourseHistory Empty => new();
 
-        public static CourseHistory LoadFromCsv(string path)
+        public static CourseHistory LoadFromCsv(string path) => FromCsvText(DataFile.ReadText(path));
+
+        public static CourseHistory FromCsvText(string csvText)
         {
-            path = DataFile.Resolve(path);
             var history = new CourseHistory();
-
-            if (!File.Exists(path))
-            {
-                Console.WriteLine($"Note: no course history at '{path}'. Room preference is disabled.");
-                return history;
-            }
-
-            var lines = File.ReadAllLines(path);
+            var lines = Csv.Lines(csvText).ToArray();
             if (lines.Length < 2)
                 return history;
 

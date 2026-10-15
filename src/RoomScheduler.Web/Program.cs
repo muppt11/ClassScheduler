@@ -1,30 +1,18 @@
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using RoomScheduler.Web.Components;
+using RoomScheduler.Web.Services;
 
-var builder = WebApplication.CreateBuilder(args);
+// The whole app runs in the browser, so it can be hosted as static files
+// (GitHub Pages). Department spreadsheets are read in the browser and kept in
+// its local storage; they are never uploaded anywhere.
+var builder = WebAssemblyHostBuilder.CreateDefault(args);
+builder.RootComponents.Add<Routes>("#app");
+builder.RootComponents.Add<HeadOutlet>("head::after");
 
-// Add services to the container.
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+builder.Services.AddSingleton<PlanningService>();
 
-// Rooms and past usage are read once and shared by every page.
-builder.Services.AddSingleton<RoomScheduler.Web.Services.SchedulingService>();
-
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
-}
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
-
-app.UseAntiforgery();
-
-app.MapStaticAssets();
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
-
-app.Run();
+var host = builder.Build();
+await host.Services.GetRequiredService<PlanningService>()
+    .InitAsync(new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+await host.RunAsync();

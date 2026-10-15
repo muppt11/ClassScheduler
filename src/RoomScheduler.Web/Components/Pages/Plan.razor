@@ -1,0 +1,472 @@
+@page "/"
+@page "/plan"
+@inject PlanningService Planning
+@inject IJSRuntime JS
+
+<PageTitle>Semester plan</PageTitle>
+
+<h1>Semester plan</h1>
+<div class="files">
+    <div class="files-head">
+        <h2>Files</h2>
+        <span class="summary">
+            Add each semester's files here: the new Classes App and preference workbook, each finished
+            semester's actual schedule, or a new rooms table. The app works out which is which. Files are
+            read and kept in this browser only; they are never uploaded anywhere.
+        </span>
+    </div>
+
+    <div class="controls">
+        <label>Add files</label>
+        <InputFile OnChange="Upload" accept=".xlsx" multiple />
+        @foreach (var m in _messages)
+        {
+            <span class="@(m.Ok ? "summary" : "warn")">@m.Text</span>
+        }
+    </div>
+
+    @{
+        var requests = Planning.Of(FileKind.Requests);
+        var past = Planning.Of(FileKind.PastSchedule);
+        var rooms = Planning.Of(FileKind.Rooms);
+    }
+
+    <table class="filetable">
+        <thead>
+            <tr><th>Use</th><th>File</th><th>What it is</th><th>Added</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var f in requests)
+            {
+                <tr class="@(f.Name == _chosen ? "chosen" : "")">
+                    <td><label class="inline"><input type="radio" name="req" checked="@(f.Name == _chosen)" @onchange="() => _chosen = f.Name" /> schedule this</label></td>
+                    <td class="mono">@f.Name</td>
+                    <td>Requests. @f.Detail</td>
+                    <td class="dim">@f.Saved.ToString("MMM d, yyyy")</td>
+                    <td><button class="ghost small" @onclick="() => Remove(f.Name)">remove</button></td>
+                </tr>
+            }
+            @foreach (var f in past)
+            {
+                <tr>
+                    <td>
+                        <label class="inline">
+                            <input type="checkbox" checked="@Planning.ActiveHistory.Contains(f.Name)"
+                                   @onchange="e => Planning.SetHistoryActive(f.Name, (bool)e.Value!)" /> use as history
+                        </label>
+                    </td>
+                    <td class="mono">@f.Name</td>
+                    <td>Past schedule. @f.Detail</td>
+                    <td class="dim">@f.Saved.ToString("MMM d, yyyy")</td>
+                    <td><button class="ghost small" @onclick="() => Remove(f.Name)">remove</button></td>
+                </tr>
+            }
+            @foreach (var f in rooms)
+            {
+                <tr>
+                    <td class="dim">@(f.Name == Planning.RoomsSource ? "in use" : "older")</td>
+                    <td class="mono">@f.Name</td>
+                    <td>Rooms table. @f.Detail</td>
+                    <td class="dim">@f.Saved.ToString("MMM d, yyyy")</td>
+                    <td><button class="ghost small" @onclick="() => Remove(f.Name)">remove</button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <div class="controls">
+        <button @onclick="BuildChosen" disabled="@(_busy || _chosen.Length == 0)">@(_busy ? "Working" : "Build schedule")</button>
+        <span class="summary">
+            @if (_chosen.Length == 0)
+            {
+                @("Add a Classes App workbook to schedule.")
+            }
+            else
+            {
+                <span>Schedules <b>@_chosen</b> using history from <b>@Planning.Past.Label</b>
+                (newest semester counts as "last time"), <b>@Planning.Rooms.Count</b> rooms from @Planning.RoomsSource,
+                and <b>@Planning.Faculty.All.Count()</b> faculty profiles.</span>
+            }
+        </span>
+    </div>
+</div>
+
+@if (_error != null)
+{
+    <div class="problems">@_error</div>
+}
+
+@if (_plan != null)
+{
+    <p class="meta">Showing the schedule built from <b>@Planning.LatestSource</b>.</p>
+}
+
+@if (_plan != null)
+{
+    var counts = _plan.Placements.GroupBy(p => p.Status).ToDictionary(g => g.Key, g => g.Count());
+    var flags = _plan.AllFlags.Select(x => x.Flag).Concat(_plan.GeneralFlags).ToList();
+
+    <div class="stats">
+        <div><strong>@counts.GetValueOrDefault("Scheduled")</strong> scheduled</div>
+        <div><strong>@(counts.GetValueOrDefault("Not scheduled") + counts.GetValueOrDefault("No room"))</strong> need placing</div>
+        <div><strong>@counts.GetValueOrDefault("Online")</strong> online</div>
+        @if (_plan.Rules.ScheduleDiscussions)
+        {
+            <div><strong>@_plan.Discussions.Count</strong> discussions</div>
+        }
+        <div class="bad"><strong>@flags.Count(f => f.Level == FlagLevel.Problem)</strong> problems</div>
+        <div class="mid"><strong>@flags.Count(f => f.Level == FlagLevel.Review)</strong> to review</div>
+        <div><strong>@_plan.Placements.Count(p => p.Fit == "Max high")</strong> rooms max high</div>
+        <div class="right">
+            <button class="ghost" @onclick="Rebuild" disabled="@_busy" title="Run the schedule again with the current faculty profiles">Rebuild</button>
+            <button @onclick="DownloadAll">Download workbook</button>
+            <button class="ghost" @onclick="DownloadGrids">Room calendars only</button>
+        </div>
+    </div>
+
+    @if (_needsRebuild)
+    {
+        <div class="problems rebuild">
+            Faculty changed (difficult or track). Rebuild to apply.
+            <button @onclick="Rebuild" disabled="@_busy">@(_busy ? "Working" : "Rebuild now")</button>
+        </div>
+    }
+
+    <div class="tabs">
+        @foreach (var t in new[] { "Schedule", "Review queue", "Room grid" })
+        {
+            <button class="@(_tab == t ? "tab on" : "tab")" @onclick="() => _tab = t">@t</button>
+        }
+    </div>
+
+    @if (_tab == "Schedule")
+    {
+        <div class="controls">
+            <label for="f">Filter</label>
+            <input id="f" placeholder="course, instructor, room" @bind="_filter" @bind:event="oninput" />
+            <label><input type="checkbox" @bind="_onlyFlagged" /> only sections with something to review</label>
+        </div>
+
+        <div class="tablewrap">
+        <table class="plan-table">
+            <thead>
+                <tr>
+                    <th>Course</th><th>Instructor</th>
+                    <th title="Click D to mark difficult faculty (scheduled first). T tenure track, P professional track.">Pri</th>
+                    <th>When</th><th>Room</th><th class="num" title="Students expected">Size</th>
+                    <th class="num" title="Size reported to the registrar: room capacity minus 10%">Report</th>
+                    <th class="num" title="How far the reported size runs over the students expected. 50-75% is allowed.">Over</th>
+                    <th>Fit</th>
+                    @if (_plan.Rules.ScheduleDiscussions) { <th>Discussion</th> }
+                    <th>Why</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in Shown())
+                {
+                    var open = p.Section.Flags.Count(f => f.Level != FlagLevel.Info);
+                    <tr class="@RowClass(p)">
+                        <td class="mono course">@p.Section.Title</td>
+                        <td class="instructor">@(p.Section.InstructorMissing ? "TBD" : p.Section.Instructor)</td>
+                        <td class="mono nowrap">
+                            @if (p.Section.Profile != null)
+                            {
+                                <button class="dtoggle @(p.Section.Difficult ? "on" : "")" title="Difficult faculty: click to toggle, then rebuild"
+                                        @onclick="() => ToggleDifficult(p.Section)">D</button>
+                            }
+                            @if (p.Section.Profile != null)
+                            {
+                                <button class="dtoggle track" title="Tenure track (T) or professional track (P): click to switch, then rebuild"
+                                        @onclick="() => ToggleTrack(p.Section)">@TrackLetter(p.Section.Track)</button>
+                            }
+                            else
+                            {
+                                @TrackLetter(p.Section.Track)
+                            }
+                        </td>
+                        <td class="mono nowrap">
+                            @(p.Time?.Pattern ?? (p.Section.Online ? "WEB" : "-"))
+                            <div class="sub">@(p.Time?.Clock ?? "")</div>
+                        </td>
+                        <td class="mono nowrap">
+                            @(p.Room?.DisplayName ?? "")
+                            @if (p.Room != null) { <div class="sub">@p.Room.Capacity seats</div> }
+                        </td>
+                        <td class="num" title="Projected @p.Section.ProjectedSize, last time @p.Section.PastEnrollment">@p.Section.SizeForRoom</td>
+                        <td class="num">@p.RegistrarCap</td>
+                        <td class="num">@(p.Room == null ? "" : _plan.Rules.OverReported(p.Room.Capacity, p.Section.SizeForRoom).ToString("+0%;-0%;0%"))</td>
+                        <td><span class="fit @FitClass(p.Fit)">@p.Fit</span></td>
+                        @if (_plan.Rules.ScheduleDiscussions)
+                        {
+                            <td class="mono nowrap" title="@(p.Discussion == null ? "" : string.Join("; ", p.Discussion.Why))">
+                                @if (p.Discussion != null)
+                                {
+                                    @p.Discussion.Time
+                                    <div class="sub">@p.Discussion.Room?.DisplayName</div>
+                                }
+                            </td>
+                        }
+                        <td class="why-cell">
+                            @string.Join("; ", p.Why)
+                            @if (open > 0)
+                            {
+                                <span class="flagcount" title="@string.Join("\n", p.Section.Flags.Where(f => f.Level != FlagLevel.Info).Select(f => f.Message))">@open to review</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+    else if (_tab == "Review queue")
+    {
+        <p class="explain">
+            Problems first, then things to review. "Possible inaccuracy" covers requests that contradict
+            themselves, the course's credit hours, or the record of past semesters.
+        </p>
+        @foreach (var level in new[] { FlagLevel.Problem, FlagLevel.Review, FlagLevel.Info })
+        {
+            var items = _plan.GeneralFlags.Where(f => f.Level == level).Select(f => ((Placement?)null, f))
+                .Concat(_plan.AllFlags.Where(x => x.Flag.Level == level).Select(x => ((Placement?)x.Placement, x.Flag)))
+                .ToList();
+            if (items.Count == 0) continue;
+
+            <details open="@(level != FlagLevel.Info)">
+                <summary>@level (@items.Count)</summary>
+                @foreach (var group in items.GroupBy(i => i.Item2.Category).OrderBy(g => g.Key))
+                {
+                    <h2>@group.Key</h2>
+                    <table>
+                        <tbody>
+                            @foreach (var (p, f) in group)
+                            {
+                                <tr>
+                                    <td class="mono">@(p?.Section.Title ?? "")</td>
+                                    <td>@(p?.Section.Instructor ?? "")</td>
+                                    <td>@f.Message</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </details>
+        }
+    }
+    else if (_tab == "Room grid")
+    {
+        <div class="controls">
+            <label for="room">Room</label>
+            <select id="room" @bind="_gridRoom">
+                @foreach (var r in GridRooms())
+                {
+                    var inUse = _plan.InRoom(r).Count > 0;
+                    <option value="@r.DisplayName">@(inUse ? PlanExport.UsedMark : "")@r.DisplayName (@r.Capacity)@(inUse ? "" : " - empty")</option>
+                }
+            </select>
+            <span class="summary">● marks rooms with classes this semester. @GridRoom()?.Notes</span>
+        </div>
+
+        var room = GridRoom();
+        if (room != null)
+        {
+            var inRoom = _plan.InRoom(room);
+            <table class="grid">
+                <thead>
+                    <tr><th></th>@foreach (var d in Weekdays) { <th>@d</th> }</tr>
+                </thead>
+                <tbody>
+                    @for (var t = new TimeSpan(8, 0, 0); t < new TimeSpan(21, 0, 0); t += TimeSpan.FromMinutes(30))
+                    {
+                        var slot = t;
+                        <tr>
+                            <td class="mono dim">@MeetingTime.ClockTime(slot)</td>
+                            @foreach (var d in Weekdays)
+                            {
+                                var here = inRoom.FirstOrDefault(p => p.Time!.Days.Contains(d) && p.Time.Start <= slot && slot < p.Time.End);
+                                if (here == null)
+                                {
+                                    <td></td>
+                                }
+                                else
+                                {
+                                    bool first = here.Time!.Start > slot - TimeSpan.FromMinutes(30);
+                                    <td class="busy" style="background:@ColorFor(here.Label)">
+                                        @if (first)
+                                        {
+                                            <b>@here.Label</b><br />@(here.IsDiscussion ? "TA" : here.Section.Instructor)
+                                        }
+                                    </td>
+                                }
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+}
+
+@code {
+    private static readonly DayOfWeek[] Weekdays =
+        { DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday };
+
+    private static readonly string[] Palette =
+        { "#fce4d6", "#ddebf7", "#e2efda", "#fff2cc", "#ede1f5", "#d9f2f2", "#f8d7da", "#ffe699", "#c6e0b4", "#bdd7ee" };
+
+    private string _chosen = "";
+    private Planner.Plan? _plan;
+    private string? _error;
+    private bool _busy;
+    private string _tab = "Schedule";
+    private string _filter = "";
+    private bool _onlyFlagged;
+    private string _gridRoom = "GDC 2.216";
+    private List<(string Text, bool Ok)> _messages = new();
+
+    private const long MaxBytes = 10 * 1024 * 1024;
+
+    protected override void OnInitialized()
+    {
+        _plan = Planning.LatestPlan;
+        var requests = Planning.Of(FileKind.Requests);
+        _chosen = requests.Any(f => f.Name == Planning.LatestSource)
+            ? Planning.LatestSource
+            : requests.FirstOrDefault()?.Name ?? "";
+    }
+
+    private Task BuildChosen() => Run(() => Planning.Build(_chosen));
+
+    /// <summary>Runs the same workbook again, picking up profile changes such as difficult faculty.</summary>
+    private Task Rebuild() => Run(() => Planning.Build(Planning.LatestSource));
+
+    private static string TrackLetter(FacultyTrack t) =>
+        t switch { FacultyTrack.Tenure => "T", FacultyTrack.Professional => "P", _ => "?" };
+
+    /// <summary>Switches a professor between tenure (T) and professional (P) track. Takes effect on the next build.</summary>
+    private void ToggleTrack(SectionRequest s)
+    {
+        s.Profile!.Track = s.Profile.Track == FacultyTrack.Tenure ? FacultyTrack.Professional : FacultyTrack.Tenure;
+        foreach (var p in _plan!.Placements.Where(x => x.Section.Profile == s.Profile))
+            p.Section.Track = s.Profile.Track;
+        Planning.Faculty.Save();
+        _needsRebuild = true;
+    }
+
+    /// <summary>Saves each chosen file into the library; a new request workbook becomes the one to schedule.</summary>
+    private async Task Upload(InputFileChangeEventArgs e)
+    {
+        _messages = new();
+        _error = null;
+        foreach (var file in e.GetMultipleFiles(20))
+        {
+            try
+            {
+                using var ms = new MemoryStream();
+                await file.OpenReadStream(MaxBytes).CopyToAsync(ms);
+                var info = Planning.Save(file.Name, ms.ToArray());
+
+                if (info.Kind == FileKind.Unknown)
+                    _messages.Add(($"{file.Name}: {info.Detail}. Not saved.", false));
+                else
+                {
+                    _messages.Add(($"Saved {info.Name} as {KindName(info.Kind)}.", true));
+                    if (info.Kind == FileKind.Requests) _chosen = info.Name;
+                }
+            }
+            catch (Exception ex)
+            {
+                _messages.Add(($"{file.Name}: {ex.Message}", false));
+            }
+        }
+    }
+
+    private void Remove(string name)
+    {
+        Planning.Delete(name);
+        if (_chosen == name)
+            _chosen = Planning.Of(FileKind.Requests).FirstOrDefault()?.Name ?? "";
+        _messages = new() { ($"Removed {name}.", true) };
+    }
+
+    private static string KindName(FileKind k) => k switch
+    {
+        FileKind.Requests => "a request workbook",
+        FileKind.PastSchedule => "a past schedule (now used as history)",
+        FileKind.Rooms => "the rooms table (now in use)",
+        _ => "unknown"
+    };
+
+    /// <summary>
+    /// Builds in the browser. Shows "Working" first: the build holds the page
+    /// until it finishes, so it starts only after that has drawn.
+    /// </summary>
+    private async Task Run(Func<Planner.Plan> build)
+    {
+        _busy = true;
+        _error = null;
+        StateHasChanged();
+        await Task.Delay(50);
+        try
+        {
+            _plan = build();
+            _needsRebuild = false;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        _busy = false;
+    }
+
+    private IEnumerable<Placement> Shown() =>
+        _plan!.Placements
+            .Where(p => !_onlyFlagged || p.Section.Flags.Any(f => f.Level != FlagLevel.Info))
+            .Where(p => _filter.Length == 0 ||
+                        $"{p.Section.Title} {p.Section.Instructor} {p.Room?.DisplayName}".Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.Section.SourceRow);
+
+    private string RowClass(Placement p) =>
+        p.Section.Flags.Any(f => f.Level == FlagLevel.Problem) ? "row-bad" :
+        p.Status is "Not scheduled" or "No room" ? "row-bad" : "";
+
+    private static string FitClass(string fit) =>
+        fit == "Max high" ? "max" : fit == "Min high" ? "min" : "";
+
+    private IEnumerable<Room> GridRooms() =>
+        Planning.Rooms.Where(r => _plan!.InRoom(r).Count > 0 || r.Building == "GDC")
+            .OrderBy(r => _plan!.InRoom(r).Count == 0).ThenBy(r => r.Building != "GDC").ThenBy(r => r.DisplayName);
+
+    private Room? GridRoom() => Planning.Rooms.FirstOrDefault(r => r.DisplayName == _gridRoom);
+
+    private readonly Dictionary<string, string> _colors = new();
+    private string ColorFor(string key)
+    {
+        if (!_colors.TryGetValue(key, out var c))
+            _colors[key] = c = Palette[_colors.Count % Palette.Length];
+        return c;
+    }
+
+    private bool _needsRebuild;
+
+    /// <summary>Marks or unmarks difficult faculty on their profile. Takes effect on the next build.</summary>
+    private void ToggleDifficult(SectionRequest s)
+    {
+        s.Profile!.Difficult = !s.Profile.Difficult;
+        foreach (var p in _plan!.Placements.Where(x => x.Section.Profile == s.Profile))
+            p.Section.Difficult = s.Profile.Difficult;
+        Planning.Faculty.Save();
+        _needsRebuild = true;
+    }
+
+    private async Task DownloadAll() =>
+        await Save($"{FileStem()} schedule.xlsx", PlanExport.Workbook(_plan!, Planning.Rooms));
+
+    private async Task DownloadGrids() =>
+        await Save($"{FileStem()} room calendars.xlsx", PlanExport.GridsOnly(_plan!, Planning.Rooms));
+
+    private string FileStem() => string.IsNullOrWhiteSpace(_plan?.Semester) ? "Semester" : _plan!.Semester;
+
+    private async Task Save(string name, byte[] bytes) =>
+        await JS.InvokeVoidAsync("saveFile", name, Convert.ToBase64String(bytes));
+}
