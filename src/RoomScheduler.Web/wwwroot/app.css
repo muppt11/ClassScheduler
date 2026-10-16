@@ -420,12 +420,8 @@ table.tracktable td:not(:first-child), table.tracktable th:not(:first-child) { t
 .upload-step h3 { font-size: 13px; margin: 0 0 3px; color: var(--ink); }
 .upload-step .hint { margin: 0 0 7px; max-width: 95ch; }
 .upload-step .req, .upload-step .rec, .upload-step .opt {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
-    padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: middle;
+    font-size: 12px; font-weight: normal; color: var(--dim); margin-left: 4px;
 }
-.upload-step .req { background: #f8d7da; color: #8a1c25; }
-.upload-step .rec { background: #fff2cc; color: var(--warn); }
-.upload-step .opt { background: var(--panel); color: var(--dim); }
 .filerow { display: flex; align-items: baseline; gap: 10px; font-size: 12px; padding: 4px 6px; margin-top: 4px; flex-wrap: wrap; }
 .filerow.chosen { background: #fdf3ea; }
 .filerow label { margin: 0; }
