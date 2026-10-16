@@ -24,9 +24,9 @@
 
     <script>
         // Saves bytes from the app as a file, used for spreadsheet exports.
-        window.saveFile = (name, base64) => {
+        window.saveFile = (name, base64, type) => {
             const link = document.createElement("a");
-            link.href = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + base64;
+            link.href = "data:" + (type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") + ";base64," + base64;
             link.download = name;
             link.click();
         };

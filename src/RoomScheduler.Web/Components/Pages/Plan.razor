@@ -11,6 +11,8 @@
         var requests = Planning.Of(FileKind.Requests);
         var past = Planning.Of(FileKind.PastSchedule);
         var rooms = Planning.Of(FileKind.Rooms);
+        var capture = Planning.Of(FileKind.LectureCapture);
+        var other = Planning.Of(FileKind.Other);
     }
 
     <div class="upload-step">
@@ -71,6 +73,35 @@
             </div>
         }
         @Messages(FileKind.Rooms)
+    </div>
+
+    <div class="upload-step">
+        <h3>4. Additional files <span class="opt">(optional)</span></h3>
+        <p class="hint">
+            Anything else for this semester. A new Lectures Online room list from the registrar is used for
+            recording requests (now using @Planning.LectureCaptureSource, @Planning.LectureCaptureRooms rooms).
+            Other files, such as notes or maps, are kept here for reference.
+        </p>
+        <InputFile OnChange="e => Upload(e, FileKind.Other)" multiple />
+        @foreach (var f in capture)
+        {
+            <div class="filerow">
+                <span class="dim">@(f.Name == Planning.LectureCaptureSource ? "in use" : "older")</span>
+                <span class="mono">@f.Name</span>
+                <span class="dim">@f.Detail</span>
+                <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button>
+            </div>
+        }
+        @foreach (var f in other)
+        {
+            <div class="filerow">
+                <span class="mono">@f.Name</span>
+                <span class="dim">@f.Detail</span>
+                <button class="ghost small" @onclick="() => DownloadFile(f.Name)">download</button>
+                <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button>
+            </div>
+        }
+        @Messages(FileKind.Other)
     </div>
 
     <div class="controls">
@@ -323,7 +354,6 @@
     private string _gridRoom = "GDC 2.216";
     private List<(string Text, bool Ok)> _messages = new();
 
-    private const long MaxBytes = 10 * 1024 * 1024;
 
     protected override void OnInitialized()
     {
@@ -366,14 +396,20 @@
             try
             {
                 using var ms = new MemoryStream();
-                await file.OpenReadStream(MaxBytes).CopyToAsync(ms);
-                var info = Planning.Save(file.Name, ms.ToArray());
+                if (file.Size > PlanningSession.MaxFileBytes)
+                {
+                    _messages.Add(($"{file.Name}: too large to keep in the browser (limit {PlanningSession.SizeText(PlanningSession.MaxFileBytes)}). Not saved.", false));
+                    continue;
+                }
+                await file.OpenReadStream(PlanningSession.MaxFileBytes).CopyToAsync(ms);
+                var info = Planning.Save(file.Name, ms.ToArray(), expected);
 
                 if (info.Kind == FileKind.Unknown)
-                    _messages.Add(($"{file.Name}: {info.Detail}. Not saved.", false));
+                    _messages.Add(($"{file.Name}: {info.Detail}. Not saved." +
+                                   (expected == FileKind.Other ? "" : " To keep it anyway, add it under 4. Additional files."), false));
                 else
                 {
-                    _messages.Add(info.Kind == expected
+                    _messages.Add(info.Kind == expected || (expected == FileKind.Other && info.Kind == FileKind.LectureCapture)
                         ? ($"Added {info.Name}.", true)
                         : ($"{info.Name} looks like {KindName(info.Kind)}, so it was added there instead.", true));
                     if (info.Kind == FileKind.Requests) _chosen = info.Name;
@@ -396,11 +432,19 @@
 
     private static string KindName(FileKind k) => k switch
     {
-        FileKind.Requests => "a preference sheet",
-        FileKind.PastSchedule => "a past schedule",
-        FileKind.Rooms => "a rooms table",
+        FileKind.Requests => "a preference sheet (step 1)",
+        FileKind.PastSchedule => "a past schedule (step 2)",
+        FileKind.Rooms => "a rooms table (step 3)",
+        FileKind.LectureCapture => "a Lectures Online list (step 4)",
+        FileKind.Other => "an additional file (step 4)",
         _ => "unknown"
     };
+
+    private async Task DownloadFile(string name)
+    {
+        if (Planning.FileBytes(name) is byte[] bytes)
+            await JS.InvokeVoidAsync("saveFile", name, Convert.ToBase64String(bytes), "application/octet-stream");
+    }
 
     private FileKind _messageSection;
 

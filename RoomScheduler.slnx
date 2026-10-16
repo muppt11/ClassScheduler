@@ -4,4 +4,7 @@
     <Project Path="src/RoomScheduler.Core/RoomScheduler.Core.csproj" />
     <Project Path="src/RoomScheduler.Web/RoomScheduler.Web.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RoomScheduler.Tests/RoomScheduler.Tests.csproj" />
+  </Folder>
 </Solution>

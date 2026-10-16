@@ -19,11 +19,16 @@ run `dotnet run --project src/RoomScheduler.Web`, and open the address it prints
 
 ## Each semester
 
-1. **Semester plan → Files → Add files.** Upload the new Classes App + preference workbook.
-   Also add each finished semester's actual schedule (the registrar export with CNBR,
-   DAYS1, BLDG1...) and a new rooms table if the registrar sends one. The app works out
-   which file is which and keeps them in this browser for next time. All past schedules are used as
-   history; the newest counts as "last time".
+1. **Semester plan: add files in four steps.**
+   1. Preference sheet (required): the workbook with the Classes App and Scheduling Preferences sheets.
+   2. Past schedules (recommended): each finished semester's registrar export (CNBR, DAYS1,
+      BLDG1...). The newest counts as "last time".
+   3. Rooms table (optional): only if the registrar sends a new one.
+   4. Additional files (optional): a new Lectures Online room list is used for recording
+      requests; anything else (notes, maps) is kept for reference and can be downloaded again.
+
+   The app checks each file's contents, so a file added under the wrong step still goes to
+   the right one. Files stay in this browser for next time.
 2. **Rooms → Offline.** Check any building or room that's off limits. CPE starts checked.
 3. **Faculty.** The track list sets each professor to tenure (T) or professional (P) and
    marks difficult faculty (D). Each profile also holds times someone can't teach,
@@ -125,6 +130,10 @@ and its website are public. The website only reads them inside the browser, and 
 console version reads them from `data/private/`, which is never committed.
 
 ## Console version and testing
+
+`dotnet test` runs the tests for the file steps and the planner. If the department's files
+are in `data/private/`, it also checks them: they're recognized, they build a full schedule,
+and there are no double bookings or classes in CPE. GitHub runs the tests before every deploy.
 
 ```
 dotnet run --project src/RoomScheduler.Cli data/private/fall26_requests.xlsx \
