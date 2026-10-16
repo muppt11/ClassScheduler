@@ -7,79 +7,78 @@
 
 <h1>Semester plan</h1>
 <div class="files">
-    <div class="files-head">
-        <h2>Files</h2>
-        <span class="summary">
-            Add each semester's files here: the new Classes App and preference workbook, each finished
-            semester's actual schedule, or a new rooms table. The app works out which is which. Files are
-            read and kept in this browser only; they are never uploaded anywhere.
-        </span>
-    </div>
-
-    <div class="controls">
-        <label>Add files</label>
-        <InputFile OnChange="Upload" accept=".xlsx" multiple />
-        @foreach (var m in _messages)
-        {
-            <span class="@(m.Ok ? "summary" : "warn")">@m.Text</span>
-        }
-    </div>
-
     @{
         var requests = Planning.Of(FileKind.Requests);
         var past = Planning.Of(FileKind.PastSchedule);
         var rooms = Planning.Of(FileKind.Rooms);
     }
 
-    <table class="filetable">
-        <thead>
-            <tr><th>Use</th><th>File</th><th>What it is</th><th>Added</th><th></th></tr>
-        </thead>
-        <tbody>
-            @foreach (var f in requests)
-            {
-                <tr class="@(f.Name == _chosen ? "chosen" : "")">
-                    <td><label class="inline"><input type="radio" name="req" checked="@(f.Name == _chosen)" @onchange="() => _chosen = f.Name" /> schedule this</label></td>
-                    <td class="mono">@f.Name</td>
-                    <td>Requests. @f.Detail</td>
-                    <td class="dim">@f.Saved.ToString("MMM d, yyyy")</td>
-                    <td><button class="ghost small" @onclick="() => Remove(f.Name)">remove</button></td>
-                </tr>
-            }
-            @foreach (var f in past)
-            {
-                <tr>
-                    <td>
-                        <label class="inline">
-                            <input type="checkbox" checked="@Planning.ActiveHistory.Contains(f.Name)"
-                                   @onchange="e => Planning.SetHistoryActive(f.Name, (bool)e.Value!)" /> use as history
-                        </label>
-                    </td>
-                    <td class="mono">@f.Name</td>
-                    <td>Past schedule. @f.Detail</td>
-                    <td class="dim">@f.Saved.ToString("MMM d, yyyy")</td>
-                    <td><button class="ghost small" @onclick="() => Remove(f.Name)">remove</button></td>
-                </tr>
-            }
-            @foreach (var f in rooms)
-            {
-                <tr>
-                    <td class="dim">@(f.Name == Planning.RoomsSource ? "in use" : "older")</td>
-                    <td class="mono">@f.Name</td>
-                    <td>Rooms table. @f.Detail</td>
-                    <td class="dim">@f.Saved.ToString("MMM d, yyyy")</td>
-                    <td><button class="ghost small" @onclick="() => Remove(f.Name)">remove</button></td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    <div class="upload-step">
+        <h3>1. Preference sheet <span class="req">required</span></h3>
+        <p class="hint">
+            The semester's workbook with the <b>Classes App</b> sheet and the <b>Scheduling Preferences</b> sheet.
+            If you add more than one, pick the one to schedule.
+        </p>
+        <InputFile OnChange="e => Upload(e, FileKind.Requests)" accept=".xlsx" multiple />
+        @foreach (var f in requests)
+        {
+            <div class="filerow @(f.Name == _chosen ? "chosen" : "")">
+                <label class="inline"><input type="radio" name="req" checked="@(f.Name == _chosen)" @onchange="() => _chosen = f.Name" /> schedule this</label>
+                <span class="mono">@f.Name</span>
+                <span class="dim">@f.Detail</span>
+                <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button>
+            </div>
+        }
+        @Messages(FileKind.Requests)
+    </div>
+
+    <div class="upload-step">
+        <h3>2. Past schedules <span class="rec">recommended</span></h3>
+        <p class="hint">
+            What actually ran in earlier semesters (the registrar export with CNBR, DAYS1, BLDG1 columns). Add one file
+            per semester; the newest counts as "last time". Used for professors with no preferences and to check what they say.
+        </p>
+        <InputFile OnChange="e => Upload(e, FileKind.PastSchedule)" accept=".xlsx" multiple />
+        @foreach (var f in past)
+        {
+            <div class="filerow">
+                <label class="inline">
+                    <input type="checkbox" checked="@Planning.ActiveHistory.Contains(f.Name)"
+                           @onchange="e => Planning.SetHistoryActive(f.Name, (bool)e.Value!)" /> use
+                </label>
+                <span class="mono">@f.Name</span>
+                <span class="dim">@f.Detail</span>
+                <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button>
+            </div>
+        }
+        @Messages(FileKind.PastSchedule)
+    </div>
+
+    <div class="upload-step">
+        <h3>3. Rooms table <span class="opt">optional</span></h3>
+        <p class="hint">
+            Only if the registrar sends a new GPC rooms-with-features table (Building, Room, Size, Features columns).
+            Otherwise the built-in table is used.
+        </p>
+        <InputFile OnChange="e => Upload(e, FileKind.Rooms)" accept=".xlsx" />
+        @foreach (var f in rooms)
+        {
+            <div class="filerow">
+                <span class="dim">@(f.Name == Planning.RoomsSource ? "in use" : "older")</span>
+                <span class="mono">@f.Name</span>
+                <span class="dim">@f.Detail</span>
+                <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button>
+            </div>
+        }
+        @Messages(FileKind.Rooms)
+    </div>
 
     <div class="controls">
         <button @onclick="BuildChosen" disabled="@(_busy || _chosen.Length == 0)">@(_busy ? "Working" : "Build schedule")</button>
         <span class="summary">
             @if (_chosen.Length == 0)
             {
-                @("Add a Classes App workbook to schedule.")
+                @("Add a preference sheet in step 1 to schedule.")
             }
             else
             {
@@ -353,10 +352,14 @@
         _needsRebuild = true;
     }
 
-    /// <summary>Saves each chosen file into the library; a new request workbook becomes the one to schedule.</summary>
-    private async Task Upload(InputFileChangeEventArgs e)
+    /// <summary>
+    /// Saves each chosen file. The file's columns decide what it is; if it was
+    /// added under the wrong step it still goes where it belongs, with a note.
+    /// </summary>
+    private async Task Upload(InputFileChangeEventArgs e, FileKind expected)
     {
         _messages = new();
+        _messageSection = expected;
         _error = null;
         foreach (var file in e.GetMultipleFiles(20))
         {
@@ -370,7 +373,9 @@
                     _messages.Add(($"{file.Name}: {info.Detail}. Not saved.", false));
                 else
                 {
-                    _messages.Add(($"Saved {info.Name} as {KindName(info.Kind)}.", true));
+                    _messages.Add(info.Kind == expected
+                        ? ($"Added {info.Name}.", true)
+                        : ($"{info.Name} looks like {KindName(info.Kind)}, so it was added there instead.", true));
                     if (info.Kind == FileKind.Requests) _chosen = info.Name;
                 }
             }
@@ -386,15 +391,27 @@
         Planning.Delete(name);
         if (_chosen == name)
             _chosen = Planning.Of(FileKind.Requests).FirstOrDefault()?.Name ?? "";
-        _messages = new() { ($"Removed {name}.", true) };
+        _messages = new();
     }
 
     private static string KindName(FileKind k) => k switch
     {
-        FileKind.Requests => "a request workbook",
-        FileKind.PastSchedule => "a past schedule (now used as history)",
-        FileKind.Rooms => "the rooms table (now in use)",
+        FileKind.Requests => "a preference sheet",
+        FileKind.PastSchedule => "a past schedule",
+        FileKind.Rooms => "a rooms table",
         _ => "unknown"
+    };
+
+    private FileKind _messageSection;
+
+    /// <summary>Upload results, shown under the step the files were added in.</summary>
+    private RenderFragment Messages(FileKind section) => __builder =>
+    {
+        if (_messageSection != section) return;
+        foreach (var m in _messages)
+        {
+            <div class="@(m.Ok ? "summary" : "warn")">@m.Text</div>
+        }
     };
 
     /// <summary>
