@@ -172,5 +172,3 @@ src/RoomScheduler.Web      the website (Blazor WebAssembly): Semester plan, Facu
 src/RoomScheduler.Cli      console version
 tools/, class schedule resources/   how course_history.csv was made from scanned catalogs
 ```
-
-A student project. Not an official university system.
