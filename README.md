@@ -157,7 +157,7 @@ are normalized from Excel numeric noise. Catalog building history still informs 
 
 ## Manual override preview
 
-Use **Chatbot** in the navigation or the persistent bottom-right **Chatbot** button on any page.
+Use **Chatbot** in the top navigation.
 The chatbot stays on its own page so Semester plan can focus on the schedule. It is visible
 even before files are uploaded. Type `Help` for upload and command guidance, or `Show review summary`
 for a summary of the built plan, or `Which classes have no room?` for specific explanations. Conversation processing runs locally against the loaded schedule; there is no connected general AI model.
