@@ -10,9 +10,16 @@
 {
     <div class="problems" role="alert">The room inventory could not be loaded. Reload the app or add a rooms table in step 3 before building.</div>
 }
-<SchedulingChat Disabled="@(_busy || _needsRebuild)" OnApplied="RefreshPlan" />
-
-<div class="files">
+<section class="files" aria-label="Files and scheduling settings">
+    <div class="files-heading">
+        <button type="button" class="ghost file-setup-toggle" aria-expanded="@(_filesOpen ? "true" : "false")" aria-controls="file-setup"
+                @onclick="() => _filesOpen = !_filesOpen">@(_filesOpen ? "Collapse file setup" : "Edit files and settings")</button>
+        @if (!_filesOpen)
+        {
+            <span class="summary">@_chosen · @Planning.Past.Label history · @Planning.Rooms.Count rooms</span>
+        }
+    </div>
+    <div id="file-setup" class="files-content" hidden="@(!_filesOpen)">
     @{
         var requests = Planning.Of(FileKind.Requests);
         var past = Planning.Of(FileKind.PastSchedule);
@@ -145,7 +152,8 @@
             }
         </span>
     </div>
-</div>
+    </div>
+</section>
 
 @if (_error != null)
 {
@@ -414,6 +422,7 @@
     private Planner.Plan? _plan;
     private string? _error;
     private bool _busy;
+    private bool _filesOpen = true;
     private string _tab = "Schedule";
     private string _filter = "";
     private bool _onlyFlagged;
@@ -424,6 +433,7 @@
     protected override void OnInitialized()
     {
         _plan = Planning.LatestPlan;
+        _filesOpen = _plan == null;
         _preferences = Planning.LatestPreferences ?? "";
         _baselineCourse = _plan?.Placements.FirstOrDefault()?.Section.Course ?? "";
         var requests = Planning.Of(FileKind.Requests);
@@ -431,8 +441,6 @@
             ? Planning.LatestSource
             : requests.FirstOrDefault()?.Name ?? "";
     }
-
-    private void RefreshPlan() { _plan = Planning.LatestPlan; }
 
     private Task BuildChosen() => Run(() => Planning.Build(_chosen, _preferences));
 
@@ -544,12 +552,14 @@
         try
         {
             _plan = build();
-                    _baselineCourse = _plan.Placements.FirstOrDefault()?.Section.Course ?? "";
+            _filesOpen = false;
+            _baselineCourse = _plan.Placements.FirstOrDefault()?.Section.Course ?? "";
             _needsRebuild = false;
         }
         catch (Exception ex)
         {
             _error = ex.Message;
+            _filesOpen = true;
         }
         _busy = false;
     }

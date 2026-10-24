@@ -35,7 +35,7 @@ run `dotnet run --project src/RoomScheduler.Web`, and open the address it prints
 3. **Faculty.** The track list sets each professor to tenure (T) or professional (P) and
    marks difficult faculty (D). Each profile also holds times someone can't teach,
    accommodations and complaints. On the schedule, the **D** and **T**/**P** buttons do the same.
-4. **Build schedule.** Then work through the **Review queue** (problems first).
+4. **Build schedule.** File uploads and settings collapse after a successful build; use **Edit files and settings** to reopen them. Then work through the **Review queue** (problems first).
    **Rebuild** after changing faculty or offline rooms.
 5. **Download workbook.** It contains:
    - the Classes App sheet with blanks filled in (highlighted), plus the registrar cap and fit
@@ -158,7 +158,7 @@ are normalized from Excel numeric noise. Catalog building history still informs 
 ## Manual override preview
 
 Use **Chatbot** in the navigation or the persistent bottom-right **Chatbot** button on any page.
-The same **Scheduling chatbot** is also at the top of Semester plan. It is visible
+The chatbot stays on its own page so Semester plan can focus on the schedule. It is visible
 even before files are uploaded. Type `Help` for upload and command guidance, or `Show review summary`
 for a summary of the built plan, or `Which classes have no room?` for specific explanations. This is a local command assistant, not a connected general AI chatbot.
 For a manual override, enter, for example:
