@@ -13,6 +13,7 @@
         <NavLink href="faculty">Faculty</NavLink>
         <NavLink href="rooms">Rooms</NavLink>
         <NavLink href="chatbot">Chatbot</NavLink>
+        <button type="button" class="tutorial-launch" @onclick="() => _tutorial!.OpenAsync()">Tutorial</button>
     </div>
 </nav>
 
@@ -28,8 +29,14 @@
     </footer>
 </div>
 
+<FirstVisitTutorial @ref="_tutorial" />
+
 <div id="blazor-error-ui" data-nosnippet>
     Something went wrong.
     <a href="." class="reload">Reload</a>
     <span class="dismiss">Close</span>
 </div>
+
+@code {
+    private FirstVisitTutorial? _tutorial;
+}

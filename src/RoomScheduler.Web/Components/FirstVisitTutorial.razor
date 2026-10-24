@@ -1,0 +1,102 @@
+@inject IJSRuntime JS
+
+<dialog @ref="_dialog" class="tutorial" aria-labelledby="tutorial-title" aria-describedby="tutorial-description">
+    <div class="tutorial-topline">
+        <span>QUICK START · SIX SHORT STEPS</span>
+        <button type="button" class="ghost small" @onclick="DismissAsync">Skip tutorial</button>
+    </div>
+    <div class="tutorial-progress" aria-label="Tutorial progress">
+        @for (var i = 0; i < Steps.Length; i++)
+        {
+            <span class="@(i <= _step ? "complete" : "")"></span>
+        }
+    </div>
+    <div class="tutorial-copy" aria-live="polite" aria-atomic="true">
+        <p class="tutorial-location">Step @(_step + 1) of @Steps.Length · @Current.Location</p>
+        <h2 id="tutorial-title">@Current.Title</h2>
+        <p id="tutorial-description">@Current.Description</p>
+        <ul>
+            @foreach (var tip in Current.Tips)
+            {
+                <li>@tip</li>
+            }
+        </ul>
+        <div class="tutorial-example"><strong>@Current.ExampleLabel</strong><p>@Current.Example</p></div>
+    </div>
+    <div class="tutorial-actions">
+        <button type="button" class="ghost" disabled="@(_step == 0)" @onclick="Back">Back</button>
+        @if (_step == Steps.Length - 1)
+        {
+            <button type="button" @onclick="DismissAsync">Start scheduling</button>
+        }
+        else
+        {
+            <button type="button" @onclick="Next">Next</button>
+        }
+    </div>
+    <p class="tutorial-reopen">You can reopen this guide anytime using Tutorial in the navigation.</p>
+</dialog>
+
+@code {
+    private ElementReference _dialog;
+    private int _step;
+    private Step Current => Steps[_step];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await JS.InvokeVoidAsync("scheduleTutorial.firstVisit", _dialog);
+    }
+
+    public async Task OpenAsync()
+    {
+        _step = 0;
+        StateHasChanged();
+        await JS.InvokeVoidAsync("scheduleTutorial.open", _dialog);
+    }
+
+    private Task DismissAsync() => JS.InvokeVoidAsync("scheduleTutorial.dismiss", _dialog).AsTask();
+    private void Back() => _step = Math.Max(0, _step - 1);
+    private void Next() => _step = Math.Min(Steps.Length - 1, _step + 1);
+
+    private sealed record Step(string Location, string Title, string Description, string[] Tips, string ExampleLabel, string Example);
+    private static readonly Step[] Steps =
+    [
+        new("Welcome", "Your semester, from files to finished plan",
+            "This quick tour shows you how to build a schedule, review the results, and try room swaps.",
+            ["Add your files, check settings, and build a first draft.",
+             "Review anything that needs attention, then adjust and export.",
+             "You can skip this tour and come back whenever you need it."],
+            "Your route", "Add files → Build → Review → Adjust settings or try swaps → Download"),
+        new("Semester plan", "Start with your workbooks",
+            "Classes and scheduling preferences are the starting point. Everything else helps improve the fit.",
+            ["Use one workbook with separate tabs, or add separate files and select the preferences file.",
+             "Add several past schedules: the latest guides room/time continuity; median enrollment across terms reduces outliers.",
+             "Optional Course Reference and Faculty Reference sheets supply reusable room baselines and faculty status."],
+            "Room sizing", "Current and historical enrollment inform the size estimate and buffer. A course minimum sets a seat floor; a preferred capacity guides room choice. Semester edits let you adjust the baseline."),
+        new("Faculty & Rooms tabs", "Check the people and spaces",
+            "Check room settings before building. Faculty profiles appear after your first build.",
+            ["In Faculty, edit tenure/professional-track status, availability, and accommodations.",
+             "In Rooms, check capacity, features, room history, and buildings or rooms marked offline.",
+             "Return to Semester plan and build or rebuild to use your changes."],
+            "Good to know", "Faculty reference data can be reused, and your saved faculty edits take precedence."),
+        new("Semester plan → Build schedule", "Build, then review the draft",
+            "Building automatically collapses file setup so you can focus on the results.",
+            ["Use Edit files and settings to reopen uploads and scheduling settings.",
+             "Open the Review queue and hover over flags to see why a section needs attention.",
+             "Use the Room grid to inspect placements. Provisional alternate times are marked for instructor review."],
+            "If a room is missing", "Online sections intentionally have no room. For other unplaced sections, check the explanation and constraints, or ask the Chatbot for help."),
+        new("Chatbot tab", "Ask for a move or explore swaps",
+            "Use a course title or number. Follow-up questions and suggestion buttons help fill in missing details.",
+            ["Ask for a free slot, a room swap, or an explanation of a placement.",
+             "Review the before/after proposal for every affected section. Room-only swaps keep meeting times; room-and-time swaps change them.",
+             "Changes are checked for conflicts and only applied when you click Apply reviewed changes. Oversized-room exceptions are optional per request."],
+            "Try saying", "“Move comp arch to reserved CS time” or “Swap rooms for comp arch with data structures.”"),
+        new("Semester plan → Download workbook", "Keep your approved schedule",
+            "Review the final placements, then download the workbook or room calendars.",
+            ["Uploads and saved settings stay in this browser; they are not shared with other users or devices.",
+             "Rebuilding or reloading resets manual moves. Download the approved schedule before doing either.",
+             "Use Tutorial in the navigation to replay this guide at any time."],
+            "Ready to begin", "Start with Classes and preferences on the Semester plan tab.")
+    ];
+}

@@ -23,6 +23,25 @@
     </div>
 
     <script>
+        window.scheduleTutorial = (() => {
+            const key = "roomscheduler:tutorial:v1";
+            let dismissed = false;
+            const remember = () => {
+                dismissed = true;
+                try { localStorage.setItem(key, "seen"); } catch { /* The guide still works without storage. */ }
+            };
+            return {
+                firstVisit(dialog) {
+                    dialog.addEventListener("cancel", remember);
+                    dialog.addEventListener("close", () => document.querySelector(".tutorial-launch")?.focus());
+                    let seen = dismissed;
+                    try { seen ||= localStorage.getItem(key) === "seen"; } catch { }
+                    if (!seen) dialog.showModal();
+                },
+                open(dialog) { if (!dialog.open) dialog.showModal(); },
+                dismiss(dialog) { remember(); dialog.close(); }
+            };
+        })();
         window.scrollChatToBottom = element => { element.scrollTop = element.scrollHeight; };
         // Saves bytes from the app as a file, used for spreadsheet exports.
         window.saveFile = (name, base64, type) => {

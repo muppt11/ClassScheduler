@@ -14,6 +14,10 @@ saved in its local storage, so they stay on your computer and are never uploaded
 They're still there next time you open the page in the same browser. Each push to `main`
 republishes the site (`.github/workflows/pages.yml`).
 
+A short walkthrough opens on your first visit. It covers uploads, faculty and room settings,
+building and reviewing, chatbot swaps, and exporting. Skip it anytime or replay it using
+**Tutorial** in the navigation. Dismissing or finishing it is remembered in this browser.
+
 To run it locally instead, install the [.NET 10 SDK](https://dotnet.microsoft.com/download),
 run `dotnet run --project src/RoomScheduler.Web`, and open the address it prints.
 
