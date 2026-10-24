@@ -6,16 +6,27 @@
         <h2 id="assistant-heading">Scheduling chatbot</h2>
         <span class="assistant-badge">Preview before applying</span>
     </div>
-    <p class="hint">Ask about this schedule or request a room change. Changes are checked for conflicts and shown for your review.</p>
+    <p class="hint">Ask about your schedule, compare rooms and times, or explore swaps. Every proposed change is checked before you review and apply it.</p>
     <div class="chat-history" @ref="_chatLog" role="log" aria-live="polite" aria-label="Scheduling assistant conversation">
-        <div class="chat-message assistant-message"><b>Assistant</b><p>I can help with your built schedule. Use a course number or a short name: “move comp arch to the reserved CS time”,
-            “swap rooms for comp arch with data structures”, or “why did this course get that room?”
-            I’ll ask when something is ambiguous and show changes before you apply them.</p></div>
+        <div class="chat-message assistant-message"><b>Assistant</b><p>Tell me what you want to improve. For example: “Find comp arch a slot in GDC after 2pm, no Fridays”,
+            “Find a smaller room but keep the same time”, or “Swap rooms for comp arch with data structures”.
+            I can compare up to three checked options, remember your follow-up conditions, and explain who would move. You approve the preview before anything changes.</p></div>
         @foreach (var message in _chatMessages)
         {
             <div class="chat-message @(message.User ? "user-message" : "assistant-message")"><b>@(message.User ? "You" : "Assistant")</b><p>@message.Text</p></div>
         }
     </div>
+    @if (_chatMessages.Count == 0)
+    {
+        <div class="chat-suggestions" aria-label="Example requests">
+            @foreach (var example in new[] { "What needs attention?", "Which classes have no room?", "What can you do?" })
+            { <button type="button" class="ghost" disabled="@(Disabled || _sending)" @onclick="() => SendMessage(example)">@example</button> }
+        </div>
+    }
+    @if (Conversation.RequestContext is string context)
+    {
+        <div class="chat-context"><p>@context</p><button type="button" class="ghost small" disabled="@(Disabled || _sending)" @onclick="CancelProposal">Reset request</button></div>
+    }
     @if (Conversation.Suggestions.Count > 0)
     {
         <div class="chat-suggestions" aria-label="Suggested replies">

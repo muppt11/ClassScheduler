@@ -5,12 +5,12 @@ namespace RoomScheduler.Tests;
 
 public class ConversationTests
 {
-    private static (SchedulingConversation Chat, Planner Planner, Planner.Plan Plan, List<Room> Rooms) Fixture(bool duplicate = false)
+    private static (SchedulingConversation Chat, Planner Planner, Planner.Plan Plan, List<Room> Rooms) Fixture(bool duplicate = false, bool abbreviated = false)
     {
         var sheet = new Xlsx.Sheet {Name = "Classes App"};
         sheet.Rows.AddRange(new[] {
             new List<string> {"Title", "Professor", "Minimum Room Size Needed"},
-            new List<string> {"429 COMPUTER ARCHITECTURE", "SMITH A", "30"},
+            new List<string> {abbreviated ? "429 COMP ORGANIZATN AND ARCH" : "429 COMPUTER ARCHITECTURE", "SMITH A", "30"},
             new List<string> {"314 DATA STRUCTURES", "JONES B", "30"}
         });
         if (duplicate) sheet.Rows.Add(new() {"429 COMPUTER ARCHITECTURE", "DOE M", "30"});
@@ -185,8 +185,8 @@ public class ConversationTests
         Assert.Contains("couldn't find", Last(f.Chat));
         Send(f, "cancel");
         Send(f, "move comp arch later");
-        Assert.Null(f.Chat.Proposal);
-        Assert.Contains("What days/time or room", Last(f.Chat));
+        Assert.NotNull(f.Chat.Proposal);
+        Assert.Contains(f.Chat.Proposal!.ProposedChanges, c => c.Placement == f.Plan.Placements[0] && c.Time.Start > TimeSpan.FromHours(9));
     }
 
     [Fact]
@@ -223,6 +223,222 @@ public class ConversationTests
         Send(f, "move data structures to GDC 2.216 Friday at 2pm");
         Assert.Null(f.Chat.Proposal);
         Assert.Contains("oversized-room exception", Last(f.Chat));
+    }
+
+    [Fact]
+    public void Searches_respect_building_days_and_start_end_bounds_instead_of_guessing_exact_time()
+    {
+        var f = Fixture();
+        Send(f, "find a slot for comp arch in GDC Tuesdays and Thursdays after 2pm before 5pm");
+        Assert.NotNull(f.Chat.Proposal);
+        var c = f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement == f.Plan.Placements[0]);
+        Assert.Equal("GDC", c.Room.Building); Assert.Equal("TTH", c.Time.Pattern);
+        Assert.True(c.Time.Start >= TimeSpan.FromHours(14)); Assert.True(c.Time.End <= TimeSpan.FromHours(17));
+        Assert.Contains("Search conditions", Last(f.Chat));
+    }
+
+    [Fact]
+    public void Followup_refines_window_and_excludes_friday_without_losing_course_or_building()
+    {
+        var f = Fixture(); Send(f, "find a slot for comp arch in RLP after 2pm");
+        Send(f, "before 5pm, no Fridays");
+        Assert.NotNull(f.Chat.Proposal);
+        foreach (var c in f.Chat.Proposal!.ProposedChanges.Where(c => c.Placement.Section.Course == "429"))
+        {
+            Assert.Equal("RLP", c.Room.Building); Assert.DoesNotContain(DayOfWeek.Friday, c.Time.Days);
+            Assert.True(c.Time.Start >= TimeSpan.FromHours(14)); Assert.True(c.Time.End <= TimeSpan.FromHours(17));
+        }
+    }
+
+    [Fact]
+    public void Smaller_room_request_can_keep_time_and_never_changes_the_plan_during_search()
+    {
+        var f = Fixture(); var p = f.Plan.Placements[0]; var before = p.Room; var time = p.Time;
+        f.Rooms.Add(new Room {Building="GDC", RoomNumber="1.101", Capacity=35});
+        // Planner owns the supplied room list, so this newly configured room is eligible.
+        Send(f, "find comp arch a smaller room and keep the same time");
+        Assert.NotNull(f.Chat.Proposal);
+        var c = f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement == p);
+        Assert.True(c.Room.Capacity < before!.Capacity); Assert.Equal(time, c.Time);
+        Assert.Same(before, p.Room); Assert.Equal(time, p.Time);
+    }
+
+    [Fact]
+    public void Natural_ordinal_and_other_options_choose_distinct_checked_previews()
+    {
+        var f = Fixture(); Send(f, "find a free slot for comp arch after 2pm");
+        var first = f.Chat.Proposal; Assert.NotNull(first);
+        Send(f, "the second one"); var second = f.Chat.Proposal;
+        Assert.NotSame(first, second); Assert.NotNull(second);
+        Send(f, "something else"); Assert.NotSame(second, f.Chat.Proposal);
+        Send(f, "what would change?"); Assert.Contains("→", Last(f.Chat));
+        Assert.Contains("Nothing has changed", Last(f.Chat));
+    }
+
+    [Fact]
+    public void Contradictory_window_is_explained_and_can_be_reset_without_relaxing_it_silently()
+    {
+        var f = Fixture(); Send(f, "find a free slot for comp arch after 4pm before 2pm");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("window is empty", Last(f.Chat));
+        Send(f, "any time"); Assert.NotNull(f.Chat.Proposal);
+    }
+
+    [Fact]
+    public void Room_availability_question_remembers_room_across_followup_and_includes_discussions()
+    {
+        var f = Fixture();
+        f.Plan.Discussions.Add(new Placement {Section=f.Plan.Placements[1].Section, Room=f.Rooms[1], Time=MeetingTime.Of("TTH",14,0,15,0)});
+        Send(f, "is GDC 1.100 available?"); Assert.Contains("What days", Last(f.Chat));
+        Send(f, "TTH 2pm-3pm"); Assert.Contains("occupied", Last(f.Chat)); Assert.Contains("314", Last(f.Chat));
+        Assert.Null(f.Chat.Proposal);
+    }
+
+    [Fact]
+    public void Without_moving_other_sections_is_honored_when_finding_a_different_room()
+    {
+        var f = Fixture();
+        f.Rooms.Add(new Room {Building="RLP", RoomNumber="1.105", Capacity=40});
+        Send(f, "find another room for comp arch at the same time without moving other classes");
+        var c = Assert.Single(f.Chat.Proposal!.ProposedChanges);
+        Assert.Equal("1.105", c.Room.RoomNumber); Assert.Equal(f.Plan.Placements[0].Time, c.Time);
+    }
+
+    [Fact]
+    public void Hard_time_constraints_remain_in_force_for_every_alternative_and_apply_is_conflict_free()
+    {
+        var f = Fixture(); var target = f.Plan.Placements[0]; target.Section.Track=FacultyTrack.Tenure;
+        Send(f, "find a slot for comp arch Monday after 11am before 6pm");
+        Assert.NotNull(f.Chat.Proposal);
+        var choices = f.Chat.Suggestions.Where(s=>s.StartsWith("Option ")).ToList();
+        foreach (var choice in choices)
+        {
+            Send(f, choice);
+            Assert.All(f.Chat.Proposal!.ProposedChanges, c => Assert.False(c.Time.Overlaps(f.Plan.Rules.TenureLunch)));
+        }
+        f.Planner.ApplyOverride(f.Plan, f.Chat.Proposal!);
+        foreach(var a in f.Plan.Placements.Where(p=>p.Room!=null && p.Time!=null))
+            Assert.DoesNotContain(f.Plan.Placements, b=>a!=b && a.Room==b.Room && b.Time?.Overlaps(a.Time!)==true);
+    }
+
+    [Fact]
+    public void New_invalid_request_clears_old_option_choices()
+    {
+        var f = Fixture(); Send(f, "find a free slot for comp arch"); Assert.NotNull(f.Chat.Proposal);
+        Send(f, "actually use XYZ 9.999"); Assert.Null(f.Chat.Proposal);
+        Send(f, "option 1"); Assert.Null(f.Chat.Proposal); Assert.Contains("no current options", Last(f.Chat));
+    }
+
+    [Fact]
+    public void Full_course_word_matches_an_abbreviated_workbook_title_and_compact_room_name()
+    {
+        var f = Fixture(abbreviated: true);
+        Send(f, "move computer architecture to GDC1.100 Tuesday at 2pm");
+        Assert.NotNull(f.Chat.Proposal); Assert.Contains(f.Chat.Proposal!.ProposedChanges, c=>c.Placement.Section.Course=="429");
+    }
+
+    [Fact]
+    public void Course_lookup_changes_the_reference_for_a_later_pronoun_without_applying_old_preview()
+    {
+        var f = Fixture(); Send(f, "move comp arch to Tuesday at 2pm");
+        Send(f, "where is data structures?"); Send(f, "move it to Thursday at 3pm");
+        Assert.NotNull(f.Chat.Proposal); Assert.Contains(f.Chat.Proposal!.ProposedChanges, c=>c.Placement.Section.Course=="314");
+        Assert.Equal(MeetingTime.Of("MWF",9,0,10,0), f.Plan.Placements[0].Time);
+    }
+
+    [Fact]
+    public void Ambiguous_time_bounds_ask_for_meridiem_instead_of_ignoring_the_requested_window()
+    {
+        var f=Fixture(); Send(f,"find a slot for comp arch after 2");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("am or pm",Last(f.Chat));
+    }
+
+    [Fact]
+    public void Bare_course_number_is_not_mistaken_for_an_option_number()
+    {
+        var f=Fixture(); Send(f,"429"); Assert.Contains("429 COMPUTER ARCHITECTURE",Last(f.Chat));
+        Send(f,"move it later"); Assert.NotNull(f.Chat.Proposal);
+    }
+
+    [Fact]
+    public void Free_room_queries_can_clarify_the_interval_without_creating_a_move()
+    {
+        var f=Fixture(); Send(f,"which rooms are free?"); Assert.Contains("start/end",Last(f.Chat));
+        Send(f,"Tuesday and Thursday 2pm-3pm"); Assert.Contains("3 active room(s)",Last(f.Chat));
+        Assert.Contains("not campus-wide",Last(f.Chat)); Assert.Null(f.Chat.Proposal);
+    }
+
+    [Fact]
+    public void Excluded_building_and_minimum_seat_count_are_respected()
+    {
+        var f=Fixture(); f.Rooms.Add(new Room {Building="RLP",RoomNumber="1.105",Capacity=45});
+        Send(f,"find a room for comp arch outside GDC with at least 45 seats at the same time");
+        var c=Assert.Single(f.Chat.Proposal!.ProposedChanges);
+        Assert.Equal("RLP",c.Room.Building); Assert.True(c.Room.Capacity>=45);
+        Assert.Equal(f.Plan.Placements[0].Time,c.Time);
+    }
+
+    [Fact]
+    public void Review_summary_gives_actual_priorities_not_only_counts()
+    {
+        var f=Fixture(); Send(f,"what needs attention?");
+        Assert.Contains("Start here",Last(f.Chat)); Assert.Contains("row 2",Last(f.Chat));
+        Assert.Null(f.Chat.Proposal);
+    }
+
+    [Fact]
+    public void Same_room_constraint_applies_to_each_suggested_time()
+    {
+        var f=Fixture(); Send(f,"find comp arch a free slot after 2pm in the same room");
+        var choices=f.Chat.Suggestions.Where(s=>s.StartsWith("Option ")).ToList(); Assert.NotEmpty(choices);
+        foreach(var choice in choices)
+        {
+            Send(f,choice);
+            var c=f.Chat.Proposal!.ProposedChanges.Single(c=>c.Placement.Section.Course=="429");
+            Assert.Equal(f.Plan.Placements[0].Room,c.Room); Assert.True(c.Time.Start>=TimeSpan.FromHours(14));
+        }
+    }
+
+    [Fact]
+    public void Comparing_options_preserves_the_selected_preview_and_lists_affected_sections()
+    {
+        var f=Fixture(); Send(f,"find a slot for comp arch after 2pm"); var selected=f.Chat.Proposal;
+        Send(f,"compare the options"); Assert.Same(selected,f.Chat.Proposal);
+        Assert.Contains("Option 1:",Last(f.Chat)); Assert.Contains("Option 2:",Last(f.Chat));
+        Assert.Contains("→",Last(f.Chat)); Assert.Contains("Nothing has changed",Last(f.Chat));
+    }
+
+    [Fact]
+    public void Room_question_with_incomplete_time_keeps_asking_instead_of_creating_a_move()
+    {
+        var f=Fixture(abbreviated: true); Send(f,"move comp arch to Tuesday at 2pm"); var selected=f.Chat.Proposal;
+        Send(f,"is GDC 1.100 free?"); Send(f,"Thursday at 2pm");
+        Assert.Contains("full start/end time",Last(f.Chat)); Assert.Same(selected,f.Chat.Proposal);
+        Send(f,"Tuesday and Thursday 2pm-3pm"); Assert.Contains("No classes",Last(f.Chat)); Assert.Same(selected,f.Chat.Proposal);
+    }
+
+    [Fact]
+    public void An_exact_request_matching_the_current_assignment_does_not_move_it_elsewhere()
+    {
+        var f=Fixture(); Send(f,"put comp arch in GDC 1.100 MWF 9am-10am");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("already",Last(f.Chat));
+    }
+
+    [Fact]
+    public void Between_window_and_list_of_excluded_weekdays_are_understood_together()
+    {
+        var f=Fixture(); Send(f,"find a slot for comp arch between 2pm and 5pm, no Mondays or Fridays");
+        Assert.NotNull(f.Chat.Proposal);
+        var c=f.Chat.Proposal!.ProposedChanges.Single(c=>c.Placement.Section.Course=="429");
+        Assert.DoesNotContain(DayOfWeek.Monday,c.Time.Days); Assert.DoesNotContain(DayOfWeek.Friday,c.Time.Days);
+        Assert.True(c.Time.Start>=TimeSpan.FromHours(14)); Assert.True(c.Time.End<=TimeSpan.FromHours(17));
+    }
+
+    [Fact]
+    public void Keeping_current_time_and_requesting_a_conflicting_window_is_not_silently_relaxed()
+    {
+        var f=Fixture(); Send(f,"find a room for comp arch at the same time after 2pm");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("keeping the current meeting time",Last(f.Chat));
+        Assert.Contains("schedule is unchanged",Last(f.Chat));
     }
 
 }

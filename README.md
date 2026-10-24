@@ -178,6 +178,19 @@ graduate slot or the CS-controlled GDC room hours; it never silently equates the
 current room when only the time changes, keep the current time for room-only changes, and search
 feasible slots when asked. It can explain course placements, show room occupancy/availability and
 answer grounded schedule questions. Unknown or ambiguous requests prompt for missing details.
+Searches now accept building restrictions (`in GDC`, `outside GDC`), named days, `after 2pm`,
+`before 5pm`, `no Fridays`, `same room`, `same time`, smaller/larger rooms, seat limits
+(`at least 45 seats` / `at most 80 seats`), lecture capture, and `without moving other classes`.
+Conditions carry into follow-ups and are shown above the message box. `Any room, any time`
+clears location/time restrictions; **Reset request** or `start over` clears the whole request.
+The search checks up to 600 room/time candidates, ranks up to nine feasible moves by affected
+section count, and shows up to three options. Choose a button, say `the second one` or
+`something else`, or ask `compare the options` / `what would change?`. An empty or impossible
+window is explained without silently relaxing it. A bounded search is not proof that no
+feasible arrangement exists.
+Room-availability questions remember the room when asking for an interval, include discussion
+bookings, and distinguish the current plan from campus-wide availability. `What needs attention?`
+lists specific review items with problems first, rather than only returning counts.
 Oversized-room consent applies to the pending request and is recorded in the proposal. The chat
 retains previews on “can you do that?” and requires the Apply button after review; it never applies
 changes just because the user says yes. Rebuilding clears pending moves. Conversation history is
@@ -190,7 +203,9 @@ changed room/time before Apply. Cancel or a validation error leaves assignments 
 
 The preview validates physical capacity, offline rooms, faculty/profile and preference-note
 unavailability, tenure lunch/graduate-slot rules, accommodations, and room/instructor overlaps.
-It searches replacement rooms for directly displaced sections without changing their times.
+It first searches replacement rooms for directly displaced sections, then a bounded chain of
+room changes (up to four additional displaced sections and 4,000 branch attempts), without
+changing any displaced meeting time. The requested section stays fixed at its proposed destination.
 Apply rechecks the entire proposed schedule and rejects stale previews. No external availability
 feed exists: availability here means the uploaded/planned schedule and configured offline rooms.
 Weekly-hour exceptions and registrar permission before CS-controlled GDC hours still require review.
@@ -214,8 +229,8 @@ Generated moves use typed rooms/meeting times rather than reparsing their day pa
 - **Final exams** are TBD.
 - **Only Fall 2025 actuals ship in the local sample set.** Add older semesters through Files to improve
   enrollment estimates; latest-term time/room continuity remains separate from enrollment statistics.
-- **Manual rearrangements are bounded.** Room moves rehouse directly displaced classes at their
-  existing times; explicit two-class swaps can exchange rooms and times. They do not search arbitrary
+- **Manual rearrangements are bounded.** Room moves can rehouse displaced classes through short room
+  chains at their existing times; explicit two-class swaps can exchange rooms and times. They do not search arbitrary
   chains of time changes. Infeasible requests are rejected without changing the plan. Overrides last until
   rebuild or page reload; download the workbook to preserve an approved result.
 - **Building distances are estimates**, from the registrar's GPC map at roughly 1.9 m per

@@ -183,4 +183,42 @@ public class SwapTests
         Assert.Contains("I read this as moving",Last(f.Chat));
     }
 
+    [Fact]
+    public void Move_can_preview_a_three_room_chain_while_every_displaced_class_keeps_its_time()
+    {
+        var f = Fixture(true);
+        var a=f.Plan.Placements[0]; var b=f.Plan.Placements[1]; var c=f.Plan.Placements[2];
+        // A's small room fits only C. B needs C's medium room when A takes B's large room.
+        f.Rooms[0].Capacity=35; f.Rooms[1].Capacity=80; f.Rooms[2].Capacity=60;
+        a.Section.SizeForRoom=30; b.Section.SizeForRoom=55; c.Section.SizeForRoom=30;
+        var time=a.Time!;
+        var proposal=f.Planner.ProposeOverride(f.Plan,a,f.Rooms[1],time,true);
+        Assert.Equal(3,proposal.ProposedChanges.Count);
+        Assert.Equal(f.Rooms[0],a.Room); Assert.Equal(f.Rooms[1],b.Room); Assert.Equal(f.Rooms[2],c.Room);
+        Assert.All(proposal.ProposedChanges, change=>Assert.Equal(time,change.Time));
+        f.Planner.ApplyOverride(f.Plan,proposal);
+        Assert.Equal(f.Rooms[1],a.Room); Assert.Equal(f.Rooms[2],b.Room); Assert.Equal(f.Rooms[0],c.Room);
+        NoConflicts(f.Plan);
+    }
+
+    [Fact]
+    public void An_impossible_room_chain_leaves_every_original_assignment_untouched()
+    {
+        var f=Fixture(true); var a=f.Plan.Placements[0]; var b=f.Plan.Placements[1];
+        f.Rooms[0].Capacity=35; f.Rooms[1].Capacity=80; f.Rooms[2].Capacity=40;
+        b.Section.SizeForRoom=60;
+        var before=f.Plan.Placements.Select(p=>(p.Room,p.Time)).ToList();
+        Assert.Throws<ArgumentException>(()=>f.Planner.ProposeOverride(f.Plan,a,f.Rooms[1],a.Time!,true));
+        Assert.Equal(before,f.Plan.Placements.Select(p=>(p.Room,p.Time)).ToList());
+        NoConflicts(f.Plan);
+    }
+
+    [Fact]
+    public void Swap_options_accept_natural_ordinal_selection()
+    {
+        var f=Fixture(true); Send(f,"find room swaps for comp arch"); var first=f.Chat.Proposal;
+        Assert.NotNull(first); Send(f,"the second one"); Assert.NotNull(f.Chat.Proposal);
+        Assert.NotSame(first,f.Chat.Proposal); Assert.Contains("Selected option 2",Last(f.Chat));
+    }
+
 }

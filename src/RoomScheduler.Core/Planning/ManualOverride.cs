@@ -120,7 +120,42 @@ public partial class Planner
             }
             return false;
         }
-        if (!Reassign(0)) throw new ArgumentException("Cannot rehouse displaced classes at their existing times. Nothing changed; choose another room/time.");
+        bool assigned = Reassign(0);
+        if (!assigned)
+        {
+            // A direct move may need a chain: B needs C's room, while C can use
+            // the room vacated by the requested course. Keep every displaced time fixed.
+            foreach (var original in all) copies[original].Room = original == target ? room : original.Room;
+            foreach (var original in displaced) copies[original].Room = null;
+            attempts = 0;
+            bool Rehouse(List<Placement> pending, HashSet<Placement> fixedRooms, int additional)
+            {
+                if (pending.Count == 0)
+                {
+                    try { ValidateOverride(copies.Values.ToList()); return true; }
+                    catch (ArgumentException) { return false; }
+                }
+                var next = pending[0];
+                var state = copies.Values.ToList();
+                var candidates = _rooms.Where(r => RoomAllowed(next.Section, r))
+                    .Select(r => (Room: r, Blockers: state.Where(p => p != next && p.Room == r && p.Time?.Overlaps(next.Time!) == true).ToList()))
+                    .Where(c => c.Blockers.All(p => !fixedRooms.Contains(p)) && additional + c.Blockers.Count <= 4)
+                    .OrderBy(c => c.Blockers.Count).ThenBy(c => Math.Abs(c.Room.Capacity - next.Section.SizeForRoom)).ToList();
+                foreach (var candidate in candidates)
+                {
+                    if (++attempts > 4000) return false;
+                    var snapshot = state.Select(p => (Placement: p, p.Room)).ToList();
+                    next.Room = candidate.Room;
+                    foreach (var blocker in candidate.Blockers) blocker.Room = null;
+                    var pinned = new HashSet<Placement>(fixedRooms) { next };
+                    if (Rehouse(pending.Skip(1).Concat(candidate.Blockers).ToList(), pinned, additional + candidate.Blockers.Count)) return true;
+                    foreach (var previous in snapshot) previous.Placement.Room = previous.Room;
+                }
+                return false;
+            }
+            assigned = Rehouse(displaced.Select(p => copies[p]).ToList(), new HashSet<Placement> { moved }, 0);
+        }
+        if (!assigned) throw new ArgumentException("Cannot rehouse displaced classes at their existing times within the bounded room-chain search. Nothing changed; choose another room/time or a room-and-time swap.");
         ValidateOverride(copies.Values.ToList());
         var changes = all.Where(p => p.Room != copies[p].Room || !Equals(p.Time, copies[p].Time))
             .Select(p => new OverrideChange(p, p.Room, p.Time, copies[p].Room!, copies[p].Time!)).ToList();

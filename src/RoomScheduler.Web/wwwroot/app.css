@@ -449,6 +449,10 @@ table.tracktable td:not(:first-child), table.tracktable th:not(:first-child) { t
 .chat-suggestions button { white-space: normal; text-align: left; }
 
 .assistant-proposal .sub { color: var(--dim); font-size: 11px; margin-top: 4px; }
+.chat-context { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-left: 3px solid var(--orange); background: #f6f4f1; padding: 10px 12px; margin: 12px 0; font-size: 12px; }
+.chat-context p { margin: 0; }
+.chat-context button { flex-shrink: 0; }
+@media (max-width: 600px) { .chat-context { align-items: flex-start; flex-direction: column; } }
 
 /* First-visit walkthrough, also available from the navigation. */
 .utnav-inner { flex-wrap: wrap; }
