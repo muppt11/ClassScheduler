@@ -9,7 +9,7 @@
     <p class="hint">Ask about this schedule or request a room change. Changes are checked for conflicts and shown for your review.</p>
     <div class="chat-history" @ref="_chatLog" role="log" aria-live="polite" aria-label="Scheduling assistant conversation">
         <div class="chat-message assistant-message"><b>Assistant</b><p>I can help with your built schedule. Use a course number or a short name: “move comp arch to the reserved CS time”,
-            “where is data structures?”, or “why did this course get that room?”
+            “swap rooms for comp arch with data structures”, or “why did this course get that room?”
             I’ll ask when something is ambiguous and show changes before you apply them.</p></div>
         @foreach (var message in _chatMessages)
         {
@@ -21,17 +21,18 @@
         <div class="chat-suggestions" aria-label="Suggested replies">
             @foreach (var choice in Conversation.Suggestions)
             {
-                <button type="button" class="ghost" disabled="@Disabled" @onclick="() => SendMessage(choice)">@choice</button>
+                <button type="button" class="ghost" disabled="@(Disabled || _sending)" @onclick="() => SendMessage(choice)">@choice</button>
             }
         </div>
     }
     <form class="chat-composer" @onsubmit="SendChat" @onsubmit:preventDefault>
         <label class="chat-input-label" for="assistant-request">Message the scheduling assistant</label>
         <input id="assistant-request" @bind="_overrideText" @bind:event="oninput" placeholder="Ask for help or describe a room/time change…" autocomplete="off" />
-        <button type="submit" disabled="@Disabled">Send</button>
+        <button type="submit" disabled="@(Disabled || _sending)">@(_sending ? "Checking…" : "Send")</button>
     </form>
+    @if (_sending) { <p role="status">Checking rooms, swap partners and scheduling constraints…</p> }
     <label class="inline"><input type="checkbox" @bind="_allowOversized" /> Allow an intentional oversized-room exception for the next request</label>
-    <p class="hint">Uses the current schedule in this browser. Room moves keep displaced classes at their existing times. Rebuild or reload resets manual moves.</p>
+    <p class="hint">Uses the current schedule in this browser. Room-only swaps keep times; room-and-time swaps are labeled in the preview. Rebuild or reload resets manual moves.</p>
     @if (Disabled) { <p class="warn">Rebuild the schedule to use your faculty changes before requesting a move.</p> }
     @if (_proposal != null)
     {
@@ -42,10 +43,10 @@
                 <thead><tr><th>Section</th><th>Before</th><th>Proposed</th></tr></thead>
                 <tbody>
                     @foreach (var change in _proposal.ProposedChanges)
-                    { <tr><td>@change.Placement.Section.Title — @change.Placement.Section.Instructor</td><td>@change.BeforeRoom?.DisplayName @change.BeforeTime</td><td>@change.Room.DisplayName @change.Time</td></tr> }
+                    { <tr><td>@change.Placement.Section.Title — @change.Placement.Section.Instructor<div class="sub">Source row @(change.Placement.Section.SourceRow + 1)</div></td><td>@change.BeforeRoom?.DisplayName @change.BeforeTime</td><td>@change.Room.DisplayName @change.Time</td></tr> }
                 </tbody>
             </table></div>
-            <button @onclick="ApplyOverride" disabled="@Disabled">Apply reviewed changes</button>
+            <button @onclick="ApplyOverride" disabled="@(Disabled || _sending)">Apply reviewed changes</button>
             <button class="ghost" @onclick="CancelProposal">Cancel</button>
         </div>
     }
@@ -55,6 +56,7 @@
     [Parameter] public EventCallback OnApplied { get; set; }
     private string _overrideText = "";
     private bool _allowOversized;
+    private bool _sending;
     private ElementReference _chatLog;
     private int _shownMessages = -1;
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -69,13 +71,21 @@
 
     protected override void OnParametersSet() => Conversation.Sync(Planning.LatestPlan);
 
-    private void SendChat() => SendMessage(_overrideText);
-    private void SendMessage(string request)
+    private Task SendChat() => SendMessage(_overrideText);
+    private async Task SendMessage(string request)
     {
-        if (Disabled || string.IsNullOrWhiteSpace(request)) return;
-        _overrideText = "";
-        Conversation.Send(Planning.LatestPlan, Planning.Rooms, Planning.ProposeOverride, request, _allowOversized);
-        _allowOversized = false;
+        if (Disabled || _sending || string.IsNullOrWhiteSpace(request)) return;
+        _overrideText = ""; _sending = true;
+        StateHasChanged();
+        await Task.Delay(40);
+        try
+        {
+            Conversation.Send(Planning.LatestPlan, Planning.Rooms, Planning.ProposeOverride, request, _allowOversized,
+                Planning.ProposeMove, Planning.ProposeSwap);
+            _allowOversized = false;
+        }
+        catch (Exception ex) { Conversation.Messages.Add(new(false, "I couldn't complete that request. " + ex.Message + " Your schedule is unchanged.")); }
+        finally { _sending = false; }
     }
     private async Task ApplyOverride()
     {

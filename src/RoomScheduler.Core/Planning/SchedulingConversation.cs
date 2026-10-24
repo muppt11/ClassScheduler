@@ -18,12 +18,17 @@ public sealed class SchedulingConversation
     private Placement? _lastTarget;
     private List<Placement> _candidates = new();
     private Room? _room;
+    private bool _roomExplicit, _timeExplicit;
     private MeetingTime? _time;
     private bool _reserved, _gdcHours, _findSlot, _oversized;
     private string _awaiting = "";
     private string _pendingDetails = "";
+    private bool _swapRequested, _swapTimes, _swapTimesExplicit;
+    private string _swapPartnerQuery = "";
+    private List<Placement> _partners = new();
+    private readonly List<(string Label, Planner.OverrideProposal Proposal)> _swapOptions = new();
     private static readonly RegexOptions Ignore = RegexOptions.IgnoreCase;
-    private static readonly string[] Stop = ("i need want please can could would you me my the a an to be moved move put switch reschedule change " +
+    private static readonly string[] Stop = ("i need want please can could would you me my the a an to be moved move put switch reschedule change swap swaps exchange trade rooms times between with " +
         "it that for from into in on at time class course section reserved cs graduate slot hours gdc after before keep same current " +
         "monday tuesday wednesday thursday friday mon tue wed thu fri mwf tth mw am pm ok okay do yes thanks computer").Split(' ');
 
@@ -51,7 +56,10 @@ public sealed class SchedulingConversation
     {
         _target = null; _candidates.Clear(); _room = null; _time = null;
         _reserved = _gdcHours = _findSlot = _oversized = false;
+        _roomExplicit = _timeExplicit = false;
         _awaiting = ""; _pendingDetails = ""; Proposal = null; Suggestions.Clear();
+        _swapRequested = _swapTimes = _swapTimesExplicit = false;
+        _swapPartnerQuery = ""; _partners.Clear(); _swapOptions.Clear();
     }
 
     private void Reply(string text, params string[] choices)
@@ -64,7 +72,9 @@ public sealed class SchedulingConversation
     private static string Description(Placement p) => $"{p.Section.Title} — {p.Section.Instructor} (row {p.Section.SourceRow + 1})";
 
     public void Send(Planner.Plan? plan, IReadOnlyList<Room> rooms, Func<string, bool, Planner.OverrideProposal> propose,
-                     string message, bool allowOversized = false)
+                     string message, bool allowOversized = false,
+                     Func<Placement, Room, MeetingTime, bool, Planner.OverrideProposal>? proposeMove = null,
+                     Func<Placement, Placement, bool, bool, Planner.OverrideProposal>? proposeSwap = null)
     {
         Sync(plan);
         string text = message.Trim();
@@ -84,11 +94,41 @@ public sealed class SchedulingConversation
         {
             Reply("You can use course numbers or short names, for example ‘move comp arch to Tuesday at 2pm’ or ‘put data structures in GDC 2.216’. " +
                 "I keep the current room or time when you only change one. I’ll ask which section or reserved time you mean when needed. " +
+                "For swaps, say ‘swap rooms for comp arch with data structures’ or ‘swap it then’ to see feasible partners. " +
                 "You can also ask where a course meets, why it got that room, what's in a room, or which classes are unassigned.",
                 "Show review summary", "Which classes have no room?"); return;
         }
 
-        bool move = Regex.IsMatch(text, @"\b(move|moved|put|switch|reschedule|relocate|shift|change)\b", Ignore);
+        var selectedSwap = _swapOptions.FirstOrDefault(o => o.Label.Equals(text, StringComparison.OrdinalIgnoreCase));
+        if (selectedSwap.Proposal != null)
+        {
+            Proposal = selectedSwap.Proposal;
+            Reply("Selected this swap. Review both sections below, then Apply reviewed changes. Nothing has changed yet.", _swapOptions.Select(o => o.Label).ToArray()); return;
+        }
+        bool swap = Regex.IsMatch(text, @"\b(swap|swaps|exchange|trade)\b", Ignore);
+        bool move = swap || Regex.IsMatch(text, @"\b(move|moved|put|switch|reschedule|relocate|shift|change)\b", Ignore);
+        if (_awaiting == "swap-partner" && (!move || _partners.Any(p => Description(p).Equals(text, StringComparison.OrdinalIgnoreCase))))
+        {
+            var selected = SelectCandidate(text, _partners);
+            if (selected != null)
+            {
+                _partners = new() { selected }; _swapPartnerQuery = ""; _oversized |= allowOversized;
+                PreviewSwaps(rooms, proposeSwap); return;
+            }
+            Reply("Which section should swap with the pending course? Choose one below, or say Cancel.", _partners.Select(Description).ToArray()); return;
+        }
+        string courseText = text;
+        string? partnerQuery = null;
+        if (swap)
+        {
+            var contextPair = Regex.Match(text, @"^(?:swap|exchange|trade)\s+with\s+(.+?)[.!?]?$", Ignore);
+            var pair = Regex.Match(text, @"\b(?:swap|exchange|trade)\s+(?:the\s+)?(?:(?:rooms?|slots?|times?)(?:\s+and\s+(?:rooms?|times?))?\s+)?(?:(?:for|between|of)\s+)?(.+?)\s+(?:with|and)\s+(.+?)[.!?]?$", Ignore);
+            if (pair.Success && !Regex.IsMatch(text, @"^find room and time swaps", Ignore))
+            {
+                courseText = pair.Groups[1].Value; partnerQuery = pair.Groups[2].Value;
+            }
+            else if (contextPair.Success) { courseText = "it"; partnerQuery = contextPair.Groups[1].Value; }
+        }
         if (!move && !followup && (_target == null && _candidates.Count == 0 ||
             Regex.IsMatch(text, @"\b(where|when|why|what|which|summary|review|explain)\b", Ignore)))
         {
@@ -97,22 +137,42 @@ public sealed class SchedulingConversation
         if (!followup && (move || Regex.IsMatch(text, @"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", Ignore) || MatchRoom(text, rooms).Mentioned))
             Proposal = null;
         // A new move starts fresh; replies such as ‘actually use GDC 2.216’ refine the pending move.
-        var matches = FindCourses(text);
+        var matches = FindCourses(courseText);
         if (_target == null && matches.Count == 0 && _lastTarget != null && Regex.IsMatch(text, @"\b(it|same course|that class|that course)\b", Ignore))
             _target = _lastTarget;
-        if (move && matches.Count > 0 && (_target == null || !matches.Contains(_target))) ClearRequest();
+        if (partnerQuery != null || move && matches.Count > 0 && (_target == null || !matches.Contains(_target))) ClearRequest();
+        if (swap)
+        {
+            _swapRequested = true;
+            if (!_timeExplicit) _time = null;
+            if (!_roomExplicit) _room = null;
+            _findSlot = false;
+            if (partnerQuery != null) _swapPartnerQuery = partnerQuery;
+            if (Regex.IsMatch(text, @"\b(times?|slots?)\b", Ignore)) { _swapTimes = true; _swapTimesExplicit = true; }
+            else if (Regex.IsMatch(text, @"\brooms?\b", Ignore)) { _swapTimes = false; _swapTimesExplicit = true; }
+            if (Regex.IsMatch(text, @"^find room(?: and time)? swaps", Ignore))
+            { _swapPartnerQuery = ""; _partners.Clear(); _time = null; _room = null; _timeExplicit = _roomExplicit = false; }
+        }
+        else if (move) { _swapRequested = false; _partners.Clear(); _swapOptions.Clear(); }
+        if (partnerQuery != null && matches.Count == 0 && _lastTarget != null && Regex.IsMatch(courseText, @"\b(it|that class|that course)\b", Ignore))
+            _target = _lastTarget;
         _oversized |= allowOversized;
         if (Regex.IsMatch(text, @"reserved\s+(?:cs\s+)?time|cs\s+(?:reserved\s+)?time", Ignore)) _reserved = true;
         if (text.Contains("graduate slot", StringComparison.OrdinalIgnoreCase) || text.Contains("graduate time", StringComparison.OrdinalIgnoreCase))
         {
-            _time = _plan.Rules.GraduateSlot; _reserved = false; _gdcHours = false;
+            _time = _plan.Rules.GraduateSlot; _timeExplicit = true; _reserved = false; _gdcHours = false;
         }
         if (text.Contains("CS-controlled GDC", StringComparison.OrdinalIgnoreCase) || text.Contains("GDC hours", StringComparison.OrdinalIgnoreCase))
         {
-            _gdcHours = true; _reserved = false; _time = null;
+            _gdcHours = true; _reserved = false; _time = null; _timeExplicit = false;
         }
-        if (Regex.IsMatch(text, @"\b(any time|find (?:a |an )?(?:free|available|feasible) (?:time|slot)|find a slot)\b", Ignore)) _findSlot = true;
-        if (_awaiting == "oversized" && (followup || Regex.IsMatch(text, @"\b(allow|use|yes).*(larger?|bigger|big|oversized)\b", Ignore))) _oversized = true;
+        if (Regex.IsMatch(text, @"\b(any time|find (?:a |an )?(?:free|available|feasible) (?:time|slot)|find a slot)\b", Ignore))
+        {
+            Proposal = null;
+            if (!_roomExplicit) _room = null;
+            _findSlot = true; _timeExplicit = false; _swapRequested = false; _partners.Clear(); _swapPartnerQuery = ""; _swapOptions.Clear();
+        }
+        if ((_awaiting == "oversized" || _awaiting == "swap-oversized") && (followup || Regex.IsMatch(text, @"\b(allow|use|yes).*(larger?|bigger|big|oversized)\b", Ignore))) _oversized = true;
 
         if (_candidates.Count > 1)
         {
@@ -145,7 +205,7 @@ public sealed class SchedulingConversation
         _pendingDetails = "";
         var roomMatch = MatchRoom(details, rooms);
         if (roomMatch.Mentioned && roomMatch.Room == null) { Reply($"I couldn't find {roomMatch.Name} in the current room inventory. Which room should I use?"); return; }
-        if (roomMatch.Room != null) { _room = roomMatch.Room; Proposal = null; }
+        if (roomMatch.Room != null) { _room = roomMatch.Room; _roomExplicit = true; Proposal = null; }
         if (_reserved && !Regex.IsMatch(details, @"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", Ignore))
         {
             _awaiting = "reserved";
@@ -154,11 +214,15 @@ public sealed class SchedulingConversation
         }
         _reserved = false;
         var parsed = text.StartsWith("CS-controlled GDC hours", StringComparison.OrdinalIgnoreCase) ? null : ParseTime(details, _time ?? _target.Time);
-        if (parsed != null) { _time = parsed; Proposal = null; }
+        if (parsed != null) { _time = parsed; _timeExplicit = true; Proposal = null; }
         bool explicitClock = Regex.IsMatch(details, @"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\d{1,2}:\d{2}", Ignore);
         if (explicitClock && parsed == null && !text.StartsWith("CS-controlled GDC hours", StringComparison.OrdinalIgnoreCase))
         {
             Reply($"I have {_target.Section.Title}, but need a clear meeting time. Which days and start/end time should I use? For example, Tuesday and Thursday 2pm–3:30pm."); return;
+        }
+        if (_swapRequested)
+        {
+            PreviewSwaps(rooms, proposeSwap); return;
         }
         if (_gdcHours && _time != null && _time.Start < _plan.Rules.CsOwnsGdcFrom)
         {
@@ -206,7 +270,9 @@ public sealed class SchedulingConversation
                 string selector = $"{_target.Section.Title} / {_target.Section.Instructor} / row {_target.Section.SourceRow + 1}";
                 try
                 {
-                    var proposal = propose($"Put {selector} in {room.DisplayName} {time.Pattern} at {time.Clock}", allowOversized || _oversized);
+                    var proposal = proposeMove != null
+                        ? proposeMove(_target, room, time, allowOversized || _oversized)
+                        : propose($"Put {selector} in {room.DisplayName} {time.Pattern} at {time.Clock}", allowOversized || _oversized);
                     if (proposal.ProposedChanges.Count == 0) { Reply($"{_target.Section.Title} is already in {room.DisplayName} at {time}."); return; }
                     Proposal = proposal; _time = time; _room = room; _findSlot = false; _awaiting = "";
                     Reply($"I read this as moving {_target.Section.Title} ({_target.Section.Instructor}) to {room.DisplayName}, {time}. " +
@@ -223,7 +289,73 @@ public sealed class SchedulingConversation
                 }
             }
         Reply($"I couldn't find a valid move for {_target.Section.Title}. {error ?? "No matching rooms are available in the current inventory."} " +
-            "Your schedule is unchanged. Tell me another room/time, or ask me to find a free slot.", "Find a free slot", "Cancel");
+            "Your schedule is unchanged. Try a room swap, exchange rooms and times, or change the request.", "Find room swaps", "Find room and time swaps", "Find a free slot", "Cancel");
+    }
+
+    private void PreviewSwaps(IReadOnlyList<Room> rooms, Func<Placement, Placement, bool, bool, Planner.OverrideProposal>? proposeSwap)
+    {
+        Proposal = null; _swapOptions.Clear();
+        if (proposeSwap == null) { Reply("Room-swap support isn't available in this client. Reload the updated app."); return; }
+        if (_target?.Room == null || _target.Time == null)
+        { Reply("I need an assigned room and meeting time for the first section before I can exchange it with another class."); return; }
+        if (!_swapTimesExplicit)
+            _swapTimes = (_gdcHours && _target.Time.Start < _plan!.Rules.CsOwnsGdcFrom) || (_time != null && !Equals(_time, _target.Time));
+        if (_swapPartnerQuery.Length > 0)
+        {
+            _partners = FindCourses(_swapPartnerQuery).Where(p => p != _target).ToList();
+            if (_partners.Count == 0)
+            { Reply("Which other course should swap with " + _target.Section.Title + "? I couldn't match the second course in this schedule.", "Find room swaps", "Find room and time swaps", "Cancel"); return; }
+            if (_partners.Count == 1) _swapPartnerQuery = "";
+            if (_partners.Count > 1)
+            {
+                _awaiting = "swap-partner";
+                Reply("Which section of the other course should swap with " + Description(_target) + "?", _partners.Select(Description).ToArray()); return;
+            }
+        }
+        var candidates = (_partners.Count > 0 ? _partners : _plan!.Placements)
+            .Where(p => p != _target && !p.Section.Online && p.Room != null && p.Time != null)
+            .Where(p => _room == null || p.Room == _room)
+            .Where(p => _time == null || Equals(_swapTimes ? p.Time : _target.Time, _time))
+            .Where(p => !_gdcHours || p.Room!.Building == _plan!.Rules.HomeBuilding && p.Room.CsOwnsFrom != null &&
+                (_swapTimes ? p.Time! : _target.Time).Start >= _plan.Rules.CsOwnsGdcFrom)
+            .Where(p => _partners.Count > 0 || p.Room!.Capacity >= Math.Max(_target.Section.SizeForRoom, _target.Section.MinimumRoomCapacity) &&
+                _target.Room.Capacity >= Math.Max(p.Section.SizeForRoom, p.Section.MinimumRoomCapacity))
+            .OrderBy(p => Math.Abs(p.Room!.Capacity - Math.Max(_target.Section.SizeForRoom, _target.Section.PreferredRoomCapacity)))
+            .ThenBy(p => p.Section.SourceRow).Take(80).ToList();
+        string? error = null;
+        foreach (var partner in candidates)
+        {
+            try
+            {
+                var proposal = proposeSwap(_target, partner, _swapTimes, _oversized);
+                if (proposal.ProposedChanges.Count == 0) continue;
+                string label = $"Swap with {Description(partner)} — {partner.Room!.DisplayName}, {partner.Time}";
+                _swapOptions.Add((label, proposal));
+                if (_swapOptions.Count == 3) break;
+            }
+            catch (ArgumentException ex)
+            {
+                error ??= ex.Message;
+                if (_partners.Count == 1 && ex.Message.Contains("larger than needed", StringComparison.OrdinalIgnoreCase))
+                {
+                    _awaiting = "swap-oversized";
+                    Reply(ex.Message + " Should I allow that exception for this swap?", "Yes, allow the larger room", "Cancel"); return;
+                }
+            }
+        }
+        if (_swapOptions.Count > 0)
+        {
+            Proposal = _swapOptions[0].Proposal; _awaiting = "";
+            Reply($"I found {_swapOptions.Count} feasible {(_swapTimes ? "room-and-time" : "room-only")} swap option(s) for {_target.Section.Title}. " +
+                (_swapTimes ? "These exchange both rooms and meeting times; review contact hours for both courses. " : "Both classes keep their current meeting times. ") +
+                "The first option is shown below. Choose another option if preferred, then review both sections and Apply. Nothing has changed yet.",
+                _swapOptions.Select(o => o.Label).Append("Find room and time swaps").Append("Cancel").ToArray()); return;
+        }
+        string scope = _swapTimes ? "room-and-time" : "room-only";
+        Reply($"I couldn't find a feasible {scope} swap matching the current request for {_target.Section.Title}. " +
+            (error ?? "No eligible partner meets the requested room/time and CS-hours conditions.") +
+            " No changes were made. You can broaden the search or specify the other course.",
+            _swapTimes ? "Find room swaps" : "Find room and time swaps", "Find a free slot", "Cancel");
     }
 
     private bool AnswerQuestion(string text, IReadOnlyList<Room> rooms)

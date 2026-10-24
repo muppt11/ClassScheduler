@@ -390,6 +390,10 @@ namespace RoomScheduler
 
         public Planner.OverrideProposal ProposeOverride(string request, bool allowOversizedRoom) =>
             (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ProposeOverride(LatestPlan!, request, allowOversizedRoom);
+        public Planner.OverrideProposal ProposeMove(Placement target, Room room, MeetingTime time, bool allowOversizedRoom) =>
+            (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ProposeOverride(LatestPlan!, target, room, time, allowOversizedRoom);
+        public Planner.OverrideProposal ProposeSwap(Placement first, Placement second, bool swapTimes, bool allowOversizedRoom) =>
+            (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ProposeSwap(LatestPlan!, first, second, swapTimes, allowOversizedRoom);
         public void ApplyOverride(Planner.OverrideProposal proposal) =>
             (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ApplyOverride(LatestPlan!, proposal);
 

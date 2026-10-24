@@ -194,6 +194,15 @@ A request for a substantially oversized room requires the explicit per-request e
 this can accommodate Computer Architecture or 398T in GDC 2.216 without hard-coded course rules.
 Approved moves are marked for review and appear in exports. Rebuild/page reload replaces them.
 
+The chatbot also supports `swap rooms for comp arch with data structures` and contextual follow-ups
+such as `swap it then`. It offers up to three feasible partner options with a complete two-section
+preview. Room-only swaps preserve both sections' times. `Find room and time swaps` explicitly searches
+exchanges of both rooms and meeting times; review contact hours for each section. Both directions of
+the exchange are checked against capacity, offline rooms, faculty availability, accommodations, and all
+other room/instructor bookings. Infeasible swaps leave the plan unchanged; stale previews are rejected
+at Apply. Search checks at most 80 eligible partners; it does not prove that no larger rearrangement exists.
+Generated moves use typed rooms/meeting times rather than reparsing their day patterns as chat commands.
+
 ## Known gaps
 
 - **Discussion sections** are phase two, after the lecture schedule is approved. The code is
@@ -201,9 +210,9 @@ Approved moves are marked for review and appear in exports. Rebuild/page reload 
 - **Final exams** are TBD.
 - **Only Fall 2025 actuals ship in the local sample set.** Add older semesters through Files to improve
   enrollment estimates; latest-term time/room continuity remains separate from enrollment statistics.
-- **Manual overrides use a constrained grammar.** They can rehouse directly displaced classes at their
-  existing times. They do not search a chain of time changes or move other room occupants to free up
-  replacement rooms. Infeasible requests are rejected without changing the plan. Overrides last until
+- **Manual rearrangements are bounded.** Room moves rehouse directly displaced classes at their
+  existing times; explicit two-class swaps can exchange rooms and times. They do not search arbitrary
+  chains of time changes. Infeasible requests are rejected without changing the plan. Overrides last until
   rebuild or page reload; download the workbook to preserve an approved result.
 - **Building distances are estimates**, from the registrar's GPC map at roughly 1.9 m per
   pixel (`data/buildings.csv`). EER isn't on that map; its position comes from its label.

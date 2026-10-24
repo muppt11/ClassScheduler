@@ -44,7 +44,8 @@ public partial class Planner
             if (first > last) throw new ArgumentException("Day range must run forward within the week.");
             days = string.Join(",", Enumerable.Range((int)first, (int)last - (int)first + 1).Select(d => ((DayOfWeek)d).ToString()));
         }
-        else if (!Regex.IsMatch(days, @"^(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Mon|Tue|Wed|Thu|Fri|MWF|TTH|MW|M|T|W|TH|F)(?:[, /]+|$))+$", RegexOptions.IgnoreCase))
+        else if (!Regex.IsMatch(days, @"^(?:M|T|W|TH|F)+$", RegexOptions.IgnoreCase) &&
+                 !Regex.IsMatch(days, @"^(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Mon|Tue|Wed|Thu|Fri|M|T|W|TH|F)(?:[, /]+|$))+$", RegexOptions.IgnoreCase))
             throw new ArgumentException("Use named weekdays, a Monday through Thursday range, or a catalog pattern such as MWF or TTH.");
         string clock = match.Groups[4].Value;
         if (!clock.Contains('-') && target.Time == null)
@@ -52,10 +53,19 @@ public partial class Planner
         if (!Regex.IsMatch(clock, @"^\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)(?:\s*-\s*\d{1,2}(?::[0-5]\d)?\s*(?:am|pm))?$", RegexOptions.IgnoreCase))
             throw new ArgumentException("Use explicit am/pm, for example 10:00am-11:00am.");
         var dayList = MeetingTime.ParseDays(days);
-        string pattern = new MeetingTime(dayList, TimeSpan.Zero, TimeSpan.Zero).Pattern;
-        var times = PreferenceParser.FindTimes($"{pattern} {(clock.Contains('-') ? "" : "at ")}{clock}", clock.Contains('-') ? null : target.Time?.Duration).ToList();
+        var times = PreferenceParser.FindTimes($"{(clock.Contains('-') ? "" : "at ")}{clock}",
+            clock.Contains('-') ? null : target.Time?.Duration, dayList).ToList();
         if (times.Count != 1) throw new ArgumentException("Provide one unambiguous time, preferably with am/pm and an end time.");
-        var time = times[0].Time;
+        return ProposeOverride(plan, target, room, times[0].Time, allowOversizedRoom);
+    }
+
+    /// <summary>Typed entry point for generated moves; no day/time string round trip.</summary>
+    public OverrideProposal ProposeOverride(Plan plan, Placement target, Room room, MeetingTime time, bool allowOversizedRoom = false)
+    {
+        if (!plan.Placements.Contains(target) || !_rooms.Contains(room))
+            throw new ArgumentException("The course or room is no longer in the current plan; rebuild the proposal.");
+        if (target.Section.Online) throw new ArgumentException("Online sections have no physical room to move.");
+        string request = $"Move {target.Section.Title} to {room.DisplayName}, {time}";
         if (!TimeAllowed(target.Section, time))
         {
             string reason = target.Section.Track == FacultyTrack.Tenure && time.Overlaps(Rules.TenureLunch)
@@ -119,6 +129,43 @@ public partial class Planner
             Source = plan, Snapshot = all.Select(p => (p, p.Room, p.Time)).ToList(), Changes = changes,
             Explanation = $"Manual request: {request}. " + (allowOversizedRoom ? "Oversized-room exception explicitly allowed. " : "") +
                 "Displaced sections retain their times. Review weekly hours and registrar approval before publishing. Rebuild replaces manual overrides."
+        };
+    }
+
+    /// <summary>Exchange rooms, optionally exchanging complete meeting times, with atomic preview/apply.</summary>
+    public OverrideProposal ProposeSwap(Plan plan, Placement first, Placement second, bool swapTimes = false, bool allowOversizedRoom = false)
+    {
+        if (first == second || !plan.Placements.Contains(first) || !plan.Placements.Contains(second) ||
+            first.Section.Online || second.Section.Online || first.Room == null || second.Room == null || first.Time == null || second.Time == null)
+            throw new ArgumentException("Choose two distinct in-person sections with assigned rooms and times.");
+        var all = plan.Placements.Concat(plan.Discussions).ToList();
+        var copies = all.ToDictionary(p => p, p => new Placement {Section = p.Section, Room = p.Room, Time = p.Time, LectureOf = p.LectureOf});
+        copies[first].Room = second.Room; copies[second].Room = first.Room;
+        if (swapTimes) { copies[first].Time = second.Time; copies[second].Time = first.Time; }
+        foreach (var original in new[] {first, second})
+        {
+            var next = copies[original];
+            if (!RoomAllowed(next.Section, next.Room!))
+                throw new ArgumentException($"{next.Section.Title} cannot use {next.Room!.DisplayName}: capacity, offline-room or accommodation requirements would be broken.");
+            if (!TimeAllowed(next.Section, next.Time!))
+                throw new ArgumentException($"{next.Time} is blocked by policy or faculty availability for {next.Section.Title}.");
+            if (RoomBusy(next, next.Room!, next.Time!, copies.Values.ToList()))
+                throw new ArgumentException($"Another class still occupies {next.Room!.DisplayName} at {next.Time}; exchanging just these two classes would cause a room conflict.");
+            if (InstructorBusy(next, next.Time!, copies.Values.ToList()))
+                throw new ArgumentException($"{next.Section.Instructor} already has another class at {next.Time}; this swap would double-book the instructor.");
+            if (Rules.FitIndicator(next.Room!.Capacity, next.Section.SizeForRoom) == "Max high" && !allowOversizedRoom)
+                throw new ArgumentException($"The swap would put {next.Section.Title} in a room much larger than needed. Allow an intentional oversized-room exception to preview it.");
+        }
+        ValidateOverride(copies.Values.ToList());
+        var changes = new[] {first, second}.Where(p => p.Room != copies[p].Room || !Equals(p.Time, copies[p].Time))
+            .Select(p => new OverrideChange(p, p.Room, p.Time, copies[p].Room!, copies[p].Time!)).ToList();
+        return new OverrideProposal
+        {
+            Source = plan, Snapshot = all.Select(p => (p, p.Room, p.Time)).ToList(), Changes = changes,
+            Explanation = $"Swap {first.Section.Title} with {second.Section.Title}: " +
+                (swapTimes ? "exchange both rooms and meeting times. Check weekly contact hours for both sections. " : "exchange rooms; both sections keep their meeting times. ") +
+                (allowOversizedRoom ? "Oversized-room exception explicitly allowed. " : "") +
+                "All proposed assignments were checked for capacity, room/instructor conflicts, offline rooms, policies and accommodations. Rebuild replaces manual overrides."
         };
     }
 
