@@ -23,6 +23,7 @@
     </div>
 
     <script>
+        window.scrollChatToBottom = element => { element.scrollTop = element.scrollHeight; };
         // Saves bytes from the app as a file, used for spreadsheet exports.
         window.saveFile = (name, base64, type) => {
             const link = document.createElement("a");

@@ -160,14 +160,26 @@ are normalized from Excel numeric noise. Catalog building history still informs 
 Use **Chatbot** in the navigation or the persistent bottom-right **Chatbot** button on any page.
 The chatbot stays on its own page so Semester plan can focus on the schedule. It is visible
 even before files are uploaded. Type `Help` for upload and command guidance, or `Show review summary`
-for a summary of the built plan, or `Which classes have no room?` for specific explanations. This is a local command assistant, not a connected general AI chatbot.
+for a summary of the built plan, or `Which classes have no room?` for specific explanations. Conversation processing runs locally against the loaded schedule; there is no connected general AI model.
 For a manual override, enter, for example:
 
 ```
 Put 398T in GDC 2.216 Monday through Thursday at 10:00am-11:00am
 ```
 
-Use a course number or exact title that identifies one section. If several sections share it,
+The chatbot recognizes course numbers, title words and abbreviations such as “comp arch”, remembers
+pending requests across follow-ups and navigation, and offers clickable clarification choices for
+multiple sections or ambiguous policy terms. “Reserved CS time” is clarified as either the configured
+graduate slot or the CS-controlled GDC room hours; it never silently equates them. It can keep the
+current room when only the time changes, keep the current time for room-only changes, and search
+feasible slots when asked. It can explain course placements, show room occupancy/availability and
+answer grounded schedule questions. Unknown or ambiguous requests prompt for missing details.
+Oversized-room consent applies to the pending request and is recorded in the proposal. The chat
+retains previews on “can you do that?” and requires the Apply button after review; it never applies
+changes just because the user says yes. Rebuilding clears pending moves. Conversation history is
+kept in memory for this browser session and survives navigation, but not page reload.
+
+For the explicit command form, use a course number or exact title that identifies one section. If several sections share it,
 use `title / instructor / row N`, where N is the original spreadsheet row. Use explicit am/pm;
 a start time alone retains the section's existing per-meeting duration. Preview lists every
 changed room/time before Apply. Cancel or a validation error leaves assignments unchanged.

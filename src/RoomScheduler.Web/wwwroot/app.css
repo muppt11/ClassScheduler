@@ -448,3 +448,5 @@ footer { padding-bottom: 65px; }
 .files-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 0; }
 .files-content[hidden] { display: none; }
 .files-content > .controls { padding: 12px 0 8px; }
+.chat-suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.chat-suggestions button { white-space: normal; text-align: left; }

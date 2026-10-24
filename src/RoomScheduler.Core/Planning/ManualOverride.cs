@@ -56,8 +56,29 @@ public partial class Planner
         var times = PreferenceParser.FindTimes($"{pattern} {(clock.Contains('-') ? "" : "at ")}{clock}", clock.Contains('-') ? null : target.Time?.Duration).ToList();
         if (times.Count != 1) throw new ArgumentException("Provide one unambiguous time, preferably with am/pm and an end time.");
         var time = times[0].Time;
-        if (!TimeAllowed(target.Section, time) || !RoomAllowed(target.Section, room))
-            throw new ArgumentException("Request violates capacity, offline-room, faculty availability, accommodation, or scheduling policy constraints.");
+        if (!TimeAllowed(target.Section, time))
+        {
+            string reason = target.Section.Track == FacultyTrack.Tenure && time.Overlaps(Rules.TenureLunch)
+                ? $"tenure-track faculty lunch ({Rules.TenureLunch})"
+                : target.Section.Profile?.UnavailableTimes().Any(t => t.Overlaps(time)) == true
+                    ? "the instructor's unavailable times on their profile"
+                    : target.Section.Wishes.Blocked.Any(b => b.Time.Overlaps(time))
+                        ? "an unavailable time in the instructor's preference notes"
+                        : $"the protected graduate slot ({Rules.GraduateSlot}) for an instructor who also teaches a graduate course";
+            throw new ArgumentException($"{time} conflicts with {reason}. Choose another time; the schedule is unchanged.");
+        }
+        if (!RoomAllowed(target.Section, room))
+        {
+            string reason = Rules.Offline.IsOffline(room) ? "the room or building is offline"
+                : room.Capacity < Math.Max(target.Section.SizeForRoom, target.Section.MinimumRoomCapacity)
+                    ? $"it has {room.Capacity} seats, but at least {Math.Max(target.Section.SizeForRoom, target.Section.MinimumRoomCapacity)} are needed"
+                    : "it does not meet the section's room eligibility or faculty accommodation requirements";
+            throw new ArgumentException($"Cannot use {room.DisplayName}: {reason}.");
+        }
+        var instructorConflict = plan.Placements.FirstOrDefault(p => p != target && !target.Section.InstructorMissing &&
+            p.Section.Surname == target.Section.Surname && p.Time != null && p.Time.Overlaps(time));
+        if (instructorConflict != null)
+            throw new ArgumentException($"{target.Section.Instructor} already teaches {instructorConflict.Section.Title} at {instructorConflict.Time}. Choose a different time.");
         if (Rules.FitIndicator(room.Capacity, target.Section.SizeForRoom) == "Max high" && !allowOversizedRoom)
             throw new ArgumentException("This room is much larger than needed. Select the oversized-room exception and preview again to record an intentional exception.");
 

@@ -68,6 +68,7 @@ namespace RoomScheduler
     /// </summary>
     public class PlanningSession
     {
+        public SchedulingConversation Conversation { get; } = new();
         public SchedulingRules Rules { get; } = new();
         public List<Room> Rooms { get; private set; } = new();
         public string RoomsSource { get; private set; } = "the built-in rooms table";
@@ -381,6 +382,7 @@ namespace RoomScheduler
             LatestPreferences = preferencesFile;
             _planner = new Planner(Rooms, Campus, Past, Faculty, Rules, DepartmentHistory);
             LatestPlan = _planner.Build(workbook);
+            Conversation.Sync(LatestPlan);
             LatestSource = fileName;
             Faculty.Save();
             return LatestPlan;
