@@ -69,7 +69,7 @@
         <tr>
             <th>Room</th><th class="num">Capacity</th><th>Features</th><th>Lectures Online</th>
             <th>Status</th><th class="num" title="Classes in the current schedule">Classes</th>
-            <th class="num" title="Times CS taught here in the 2022-2026 printed catalogs">CS history</th><th>Notes</th>
+            <th class="num" title="Sections in this room from active uploaded schedules, including hybrid classes">CS history</th><th>Notes</th>
         </tr>
     </thead>
     <tbody>
@@ -83,7 +83,7 @@
                 <td>@(r.LectureCapture ? "yes" : "")</td>
                 <td>@(Offline(r) ? "offline" : r.NonStandard ? "avoid (NSC)" : r.DepartmentOnly ? "CS only" : "")</td>
                 <td class="num">@(classes > 0 ? classes : "")</td>
-                <td class="num">@(Planning.DepartmentHistory.BuildingUsage(Planning.Rules.Department, r.Building) is int n && n > 0 ? n : "")</td>
+                <td class="num" title="@string.Join("; ", Planning.Past.InRoom(r.DisplayName).Select(s => $"{s.Semester}: {s.Course} {s.Title}{(s.Hybrid ? " (hybrid)" : "")}"))">@(Planning.Past.InRoom(r.DisplayName).Count is int n && n > 0 ? n : "")</td>
                 <td class="dim">@r.Notes</td>
             </tr>
         }

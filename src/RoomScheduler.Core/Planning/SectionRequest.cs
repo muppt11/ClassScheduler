@@ -25,10 +25,12 @@ namespace RoomScheduler
         /// <summary>"Minimum Room Size Needed" on the sheet: the projected class size.</summary>
         public int ProjectedSize { get; init; }
 
-        /// <summary>What Fall 2025 (or whatever history is loaded) actually enrolled.</summary>
+        /// <summary>Median of per-semester mean enrollments in active matched history.</summary>
         public int? PastEnrollment { get; set; }
 
         /// <summary>The size the room is chosen for, after comparing projected and past numbers.</summary>
+        public int MinimumRoomCapacity { get; set; }
+        public int PreferredRoomCapacity { get; set; }
         public int SizeForRoom { get; set; }
 
         public string Type { get; init; } = "";
@@ -67,6 +69,7 @@ namespace RoomScheduler
 
         /// <summary>For a discussion section, the lecture it belongs to.</summary>
         public Placement? LectureOf { get; init; }
+        public bool ManualOverride { get; internal set; }
         public bool IsDiscussion => LectureOf != null;
 
         /// <summary>For a lecture, its planned discussion section, if any.</summary>
@@ -79,6 +82,8 @@ namespace RoomScheduler
             Section.Online ? "Online" :
             Time == null ? "Not scheduled" :
             Room == null ? "No room" : "Scheduled";
+
+        internal List<ReviewFlag> PlacementFlags { get; } = new();
 
         public string Fit { get; set; } = "";
         public int? RegistrarCap { get; set; }

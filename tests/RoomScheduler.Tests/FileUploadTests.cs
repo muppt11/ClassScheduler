@@ -228,4 +228,66 @@ public class FileUploadTests
         Assert.Null(s.FileBytes("fall25.xlsx"));
         Assert.Empty(NewSession(store).Files());
     }
+    [Fact]
+    public void Separate_classes_and_preferences_are_kept_and_joined_explicitly()
+    {
+        var store = new MemoryStore();
+        var s = NewSession(store);
+        var sheets = Xlsx.Read(new MemoryStream(Requests()));
+        byte[] Part(int index)
+        {
+            var part = new Xlsx.OutSheet { Name = sheets[index].Name };
+            foreach (var row in sheets[index].Rows) part.AddRow(row);
+            return Xlsx.Write(new[] { part });
+        }
+        Assert.Equal(FileKind.Requests, s.Save("classes.xlsx", Part(0), FileKind.Requests).Kind);
+        Assert.Equal(FileKind.Preferences, s.Save("preferences.xlsx", Part(1), FileKind.Requests).Kind);
+        var reopened = NewSession(store);
+        Assert.Equal(2, reopened.Files().Count);
+        var plan = reopened.Build("classes.xlsx", "preferences.xlsx");
+        Assert.All(plan.Placements, p => Assert.NotNull(p.Section.Form));
+        Assert.All(plan.Placements, p => Assert.NotNull(p.Room));
+        Assert.Empty(plan.Workbook.UnmatchedForms);
+        Assert.Equal(FileKind.Unknown, s.Save("classes.xlsx", Part(1), FileKind.Requests).Kind);
+        Assert.Equal(Part(0), s.FileBytes("classes.xlsx"));
+    }
+
+    [Fact]
+    public void Reference_baselines_and_faculty_edits_survive_reopening_and_semester_changes()
+    {
+        var store = new MemoryStore();
+        var s = NewSession(store);
+        s.Save("classes.xlsx", Requests(), FileKind.Requests);
+        var reference = Workbook(
+            ("Course Reference", new[] {
+                new[] { "Course", "Minimum Room Capacity", "Preferred Room Capacity", "Semester" },
+                new[] { "314", "150", "200", "" } }),
+            ("Faculty Reference", new[] {
+                new[] { "Professor", "Tenure or PTF" }, new[] { "SMITH A", "T" } }));
+        Assert.Equal(FileKind.Reference, s.Save("reference.xlsx", reference, FileKind.Other).Kind);
+        var initial = s.Build("classes.xlsx");
+        Assert.Equal(150, initial.Placements[0].Section.MinimumRoomCapacity);
+        Assert.Equal(FacultyTrack.Tenure, initial.Placements[0].Section.Track);
+        s.Faculty.Find("SMITH")!.Track = FacultyTrack.Professional;
+        s.Faculty.Save();
+        s.SetSemesterBaseline("Fall 2026", "314", 175, 200);
+        var reopened = NewSession(store);
+        var section = reopened.Build("classes.xlsx").Placements[0].Section;
+        Assert.Equal(175, section.MinimumRoomCapacity);
+        Assert.Equal(200, section.PreferredRoomCapacity);
+        Assert.Equal(FacultyTrack.Professional, section.Track);
+        Assert.Throws<ArgumentException>(() => reopened.SetSemesterBaseline("Fall 2026", "314", 200, 100));
+    }
+
+    [Fact]
+    public void Multiple_history_files_are_used_and_duplicate_terms_do_not_count_twice()
+    {
+        var s = NewSession();
+        s.Save("2025.xlsx", PastSchedule("20259"), FileKind.PastSchedule);
+        s.Save("2024.xlsx", PastSchedule("20249"), FileKind.PastSchedule);
+        s.Save("2025 copy.xlsx", PastSchedule("20259"), FileKind.PastSchedule);
+        Assert.Equal(2, s.Past.Sections.Count);
+        Assert.Equal("Fall 2025", s.Past.Semesters.First());
+    }
+
 }

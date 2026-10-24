@@ -31,9 +31,9 @@ namespace RoomScheduler
 
             var classes = sheets.FirstOrDefault(s => s.Name.Contains("Classes", StringComparison.OrdinalIgnoreCase))
                           ?? sheets.FirstOrDefault(s => HeaderRow(s, "Title") >= 0);
-            var prefs = sheets.FirstOrDefault(s => s.Name.Contains("Preference", StringComparison.OrdinalIgnoreCase));
+            var prefs = sheets.FirstOrDefault(s => HeaderRow(s, "Prof") >= 0 && HeaderRow(s, "course") >= 0);
 
-            if (classes != null) wb.ReadClasses(classes);
+            if (classes != null && HeaderRow(classes, "Title") >= 0) wb.ReadClasses(classes);
             if (prefs != null) wb.ReadPreferences(prefs);
             return wb;
         }

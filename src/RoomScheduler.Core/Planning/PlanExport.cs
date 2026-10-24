@@ -72,26 +72,26 @@ namespace RoomScheduler
                     .Select(v => (Xlsx.OutCell?)new Xlsx.OutCell(v))
                     .ToList();
 
-                void Fill(int c, string value)
+                void Fill(int c, string value, bool replace = false)
                 {
-                    if (c < 0 || value.Length == 0 || cells[c]!.Text.Trim().Length > 0) return;
+                    if (c < 0 || value.Length == 0 || (!replace && cells[c]!.Text.Trim().Length > 0)) return;
                     cells[c] = new Xlsx.OutCell(value, "FFF2CC");
                 }
 
                 if (p.Time != null)
                 {
-                    Fill(days, p.Time.Pattern);
-                    Fill(time, p.Time.Clock);
+                    Fill(days, p.Time.Pattern, p.ManualOverride);
+                    Fill(time, p.Time.Clock, p.ManualOverride);
                 }
                 if (s.Online) Fill(days, "WEB");
                 if (p.Room != null)
                 {
                     if (bldg >= 0)
                     {
-                        Fill(bldg, p.Room.Building);
-                        Fill(room, p.Room.RoomNumber);
+                        Fill(bldg, p.Room.Building, p.ManualOverride);
+                        Fill(room, p.Room.RoomNumber, p.ManualOverride);
                     }
-                    else Fill(room, p.Room.DisplayName);
+                    else Fill(room, p.Room.DisplayName, p.ManualOverride);
                 }
 
                 Fill(track, s.Track switch { FacultyTrack.Tenure => "t", FacultyTrack.Professional => "ptf", _ => "" });

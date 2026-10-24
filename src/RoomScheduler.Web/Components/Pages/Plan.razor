@@ -6,6 +6,46 @@
 <PageTitle>Semester plan</PageTitle>
 
 <h1>Semester plan</h1>
+<section class="scheduling-assistant" aria-labelledby="assistant-heading">
+    <div class="assistant-heading">
+        <h2 id="assistant-heading">Scheduling assistant</h2>
+        <span class="assistant-badge">Preview before applying</span>
+    </div>
+    <p class="hint">Ask about this schedule or request a room change. Changes are checked for conflicts and shown for your review.</p>
+    <div class="chat-history" role="log" aria-live="polite" aria-label="Scheduling assistant conversation">
+        <div class="chat-message assistant-message"><b>Assistant</b><p>Upload your Classes App and preferences below, then build a schedule.
+            I can show what needs review or help move a class. Try “Show review summary” or
+            “Put 398T in GDC 2.216 Monday through Thursday at 10:00am-11:00am”.</p></div>
+        @foreach (var message in _chatMessages)
+        {
+            <div class="chat-message @(message.User ? "user-message" : "assistant-message")"><b>@(message.User ? "You" : "Assistant")</b><p>@message.Text</p></div>
+        }
+    </div>
+    <form class="chat-composer" @onsubmit="SendChat" @onsubmit:preventDefault>
+        <label class="chat-input-label" for="assistant-request">Message the scheduling assistant</label>
+        <input id="assistant-request" @bind="_overrideText" placeholder="Ask for help or describe a room/time change…" autocomplete="off" />
+        <button type="submit" disabled="@(_busy || _needsRebuild)">Send</button>
+    </form>
+    <label class="inline"><input type="checkbox" @bind="_allowOversized" /> Allow an intentional oversized-room exception for the next request</label>
+    <p class="hint">Supported commands run in this browser. Room moves keep displaced classes at their existing times. Rebuild or reload resets manual moves.</p>
+    @if (_needsRebuild) { <p class="warn">Rebuild the schedule to use your faculty changes before requesting a move.</p> }
+    @if (_proposal != null)
+    {
+        <div class="assistant-proposal">
+            <h3>Proposed changes — not yet applied</h3>
+            <p>@_proposal.Explanation</p>
+            <div class="tablewrap"><table>
+                <thead><tr><th>Section</th><th>Before</th><th>Proposed</th></tr></thead>
+                <tbody>
+                    @foreach (var change in _proposal.ProposedChanges)
+                    { <tr><td>@change.Placement.Section.Title — @change.Placement.Section.Instructor</td><td>@change.BeforeRoom?.DisplayName @change.BeforeTime</td><td>@change.Room.DisplayName @change.Time</td></tr> }
+                </tbody>
+            </table></div>
+            <button @onclick="ApplyOverride" disabled="@_needsRebuild">Apply reviewed changes</button>
+            <button class="ghost" @onclick="CancelProposal">Cancel</button>
+        </div>
+    }
+</section>
 <div class="files">
     @{
         var requests = Planning.Of(FileKind.Requests);
@@ -16,10 +56,11 @@
     }
 
     <div class="upload-step">
-        <h3>1. Preference sheet <span class="req">(required)</span></h3>
+        <h3>1. Classes and preferences <span class="req">(required)</span></h3>
         <p class="hint">
-            The semester's workbook with the <b>Classes App</b> sheet and the <b>Scheduling Preferences</b> sheet.
-            If you add more than one, pick the one to schedule.
+            Add a combined workbook, or separate Classes App and Scheduling Preferences files.
+            Select the Classes App workbook and, when separate, select its preference file below.
+            A filename already used for a different file type is rejected; rename it to keep both.
         </p>
         <InputFile OnChange="e => Upload(e, FileKind.Requests)" accept=".xlsx" multiple />
         @foreach (var f in requests)
@@ -31,6 +72,19 @@
                 <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button>
             </div>
         }
+        <label>Separate preferences
+            <select @bind="_preferences">
+                <option value="">Use tabs in selected Classes App workbook</option>
+                @foreach (var f in Planning.Of(FileKind.Preferences))
+                {
+                    <option value="@f.Name">@f.Name (@f.Detail)</option>
+                }
+            </select>
+        </label>
+        @foreach (var f in Planning.Of(FileKind.Preferences))
+        {
+            <div class="filerow">@f.Name <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button></div>
+        }
         @Messages(FileKind.Requests)
     </div>
 
@@ -38,7 +92,7 @@
         <h3>2. Past schedules <span class="rec">(recommended)</span></h3>
         <p class="hint">
             What actually ran in earlier semesters (the registrar export with CNBR, DAYS1, BLDG1 columns). Add one file
-            per semester; the newest counts as "last time". Used for professors with no preferences and to check what they say.
+            per semester; the newest counts as "last time" for times and rooms. Enrollment sizing uses a median across active semesters.
         </p>
         <InputFile OnChange="e => Upload(e, FileKind.PastSchedule)" accept=".xlsx" multiple />
         @foreach (var f in past)
@@ -80,6 +134,9 @@
         <p class="hint">
             Anything else for this semester. A new Lectures Online room list from the registrar is used for
             recording requests (now using @Planning.LectureCaptureSource, @Planning.LectureCaptureRooms rooms).
+            Course Reference and Faculty Reference templates are also accepted here (or as tabs in the Classes App workbook).
+            Course Reference: Course, Minimum Room Capacity, Preferred Room Capacity, optional Semester (e.g. Fall 2027).
+            Faculty Reference: Professor, Tenure or PTF (T/PTF). Saved faculty edits take precedence.
             Other files, such as notes or maps, are kept here for reference.
         </p>
         <InputFile OnChange="e => Upload(e, FileKind.Other)" multiple />
@@ -92,7 +149,7 @@
                 <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button>
             </div>
         }
-        @foreach (var f in other)
+        @foreach (var f in other.Concat(Planning.Of(FileKind.Reference)))
         {
             <div class="filerow">
                 <span class="mono">@f.Name</span>
@@ -162,6 +219,20 @@
         </div>
     }
 
+    <details>
+        <summary>Course room baseline for @_plan.Semester</summary>
+        <p>Minimum is a hard floor in physical seats; preferred steers room choice. Enrollment still controls the required student count.
+            The registrar cap remains capacity minus 10%. Values below replace this semester's reference baseline; 0 clears a value.
+            Saving rebuilds the plan and replaces manual overrides.</p>
+        <select @bind="_baselineCourse">
+            @foreach (var course in _plan.Placements.Select(p => p.Section.Course).Distinct())
+            { <option value="@course">@course</option> }
+        </select>
+        <label>Minimum seats <input type="number" min="0" @bind="_minimumCapacity" /></label>
+        <label>Preferred seats <input type="number" min="0" @bind="_preferredCapacity" /></label>
+        <button @onclick="SaveBaseline">Save for semester and rebuild</button>
+    </details>
+
     <div class="tabs">
         @foreach (var t in new[] { "Schedule", "Review queue", "Room grid" })
         {
@@ -222,7 +293,7 @@
                             @(p.Room?.DisplayName ?? "")
                             @if (p.Room != null) { <div class="sub">@p.Room.Capacity seats</div> }
                         </td>
-                        <td class="num" title="Projected @p.Section.ProjectedSize, last time @p.Section.PastEnrollment">@p.Section.SizeForRoom</td>
+                        <td class="num" title="Projected @p.Section.ProjectedSize, historical median @p.Section.PastEnrollment, minimum seats @p.Section.MinimumRoomCapacity, preferred seats @p.Section.PreferredRoomCapacity">@p.Section.SizeForRoom</td>
                         <td class="num">@p.RegistrarCap</td>
                         <td class="num">@(p.Room == null ? "" : _plan.Rules.OverReported(p.Room.Capacity, p.Section.SizeForRoom).ToString("+0%;-0%;0%"))</td>
                         <td><span class="fit @FitClass(p.Fit)">@p.Fit</span></td>
@@ -345,6 +416,91 @@
         { "#fce4d6", "#ddebf7", "#e2efda", "#fff2cc", "#ede1f5", "#d9f2f2", "#f8d7da", "#ffe699", "#c6e0b4", "#bdd7ee" };
 
     private string _chosen = "";
+    private string _preferences = "";
+    private string _overrideText = "";
+    private bool _allowOversized;
+    private Planner.OverrideProposal? _proposal;
+    private string _baselineCourseValue = "";
+    private string _baselineCourse
+    {
+        get => _baselineCourseValue;
+        set
+        {
+            _baselineCourseValue = value;
+            var section = _plan?.Placements.FirstOrDefault(p => p.Section.Course == value)?.Section;
+            _minimumCapacity = section?.MinimumRoomCapacity ?? 0;
+            _preferredCapacity = section?.PreferredRoomCapacity ?? 0;
+        }
+    }
+    private int _minimumCapacity;
+    private int _preferredCapacity;
+
+    private List<(bool User, string Text)> _chatMessages = new();
+    private void SendChat()
+    {
+        string request = _overrideText.Trim();
+        if (request.Length == 0) return;
+        _chatMessages.Add((true, request));
+        _overrideText = "";
+        _proposal = null;
+        if (!request.StartsWith("Put ", StringComparison.OrdinalIgnoreCase) &&
+            (request.Equals("help", StringComparison.OrdinalIgnoreCase) || request.Contains("how", StringComparison.OrdinalIgnoreCase)))
+        {
+            _chatMessages.Add((false, "Upload combined or separate Classes App and preference files, select them, then Build schedule. " +
+                "I understand: Show review summary; Show schedule summary; or Put [course number or exact title] in [room] [days] at [start-end]. " +
+                "Use am/pm, for example 10:00am-11:00am. For duplicate sections use title / instructor / row N from the source spreadsheet. " +
+                "For a large room such as GDC 2.216, select the oversized-room exception if needed."));
+            return;
+        }
+        if (_plan == null)
+        {
+            _chatMessages.Add((false, "Add your Classes App and preferences below, then click Build schedule. I need a built schedule to check availability and propose changes. You can also type Help."));
+            return;
+        }
+        if (!request.StartsWith("Put ", StringComparison.OrdinalIgnoreCase) &&
+            (request.Contains("summary", StringComparison.OrdinalIgnoreCase) || request.Contains("review", StringComparison.OrdinalIgnoreCase)))
+        {
+            var flags = _plan.AllFlags.Select(x => x.Flag).Concat(_plan.GeneralFlags).ToList();
+            _chatMessages.Add((false, $"{_plan.Placements.Count(p => p.Status == "Scheduled")} sections scheduled; " +
+                $"{_plan.Placements.Count(p => p.Status is "No room" or "Not scheduled")} need placing. " +
+                $"{flags.Count(f => f.Level == FlagLevel.Problem)} problems and {flags.Count(f => f.Level == FlagLevel.Review)} items to review. " +
+                "Open the Review queue below for explanations, or send a room/time change."));
+            return;
+        }
+        try
+        {
+            _proposal = Planning.ProposeOverride(request, _allowOversized);
+            _chatMessages.Add((false, _proposal.ProposedChanges.Count == 0 ? "That section is already assigned to this room and time." :
+                $"I found a proposal affecting {_proposal.ProposedChanges.Count} section(s). Review the changes below, then Apply or Cancel. Nothing has changed yet."));
+            if (_proposal.ProposedChanges.Count == 0) _proposal = null;
+        }
+        catch (Exception ex) { _chatMessages.Add((false, ex.Message)); }
+    }
+    private void ApplyOverride()
+    {
+        try
+        {
+            Planning.ApplyOverride(_proposal!);
+            _proposal = null;
+            _chatMessages.Add((false, "Applied the reviewed changes. Room and instructor conflicts were checked. The schedule and workbook download now include these assignments."));
+        }
+        catch (Exception ex) { _chatMessages.Add((false, ex.Message)); _proposal = null; }
+    }
+    private void CancelProposal()
+    {
+        _proposal = null;
+        _chatMessages.Add((false, "Proposal canceled. Your schedule has not changed."));
+    }
+    private async Task SaveBaseline()
+    {
+        try
+        {
+            Planning.SetSemesterBaseline(_plan!.Semester, _baselineCourse, _minimumCapacity, _preferredCapacity);
+            await Rebuild();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
     private Planner.Plan? _plan;
     private string? _error;
     private bool _busy;
@@ -358,16 +514,18 @@
     protected override void OnInitialized()
     {
         _plan = Planning.LatestPlan;
+        _preferences = Planning.LatestPreferences ?? "";
+        _baselineCourse = _plan?.Placements.FirstOrDefault()?.Section.Course ?? "";
         var requests = Planning.Of(FileKind.Requests);
         _chosen = requests.Any(f => f.Name == Planning.LatestSource)
             ? Planning.LatestSource
             : requests.FirstOrDefault()?.Name ?? "";
     }
 
-    private Task BuildChosen() => Run(() => Planning.Build(_chosen));
+    private Task BuildChosen() => Run(() => Planning.Build(_chosen, _preferences));
 
     /// <summary>Runs the same workbook again, picking up profile changes such as difficult faculty.</summary>
-    private Task Rebuild() => Run(() => Planning.Build(Planning.LatestSource));
+    private Task Rebuild() => Run(() => Planning.Build(Planning.LatestSource, Planning.LatestPreferences));
 
     private static string TrackLetter(FacultyTrack t) =>
         t switch { FacultyTrack.Tenure => "T", FacultyTrack.Professional => "P", _ => "?" };
@@ -380,6 +538,7 @@
             p.Section.Track = s.Profile.Track;
         Planning.Faculty.Save();
         _needsRebuild = true;
+        _proposal = null;
     }
 
     /// <summary>
@@ -410,7 +569,7 @@
                 else
                 {
                     _messages.Add(info.Kind == expected || (expected == FileKind.Other && info.Kind == FileKind.LectureCapture)
-                        ? ($"Added {info.Name}.", true)
+                        ? ($"Saved {info.Name}. Same-name files of this type replace their previous version.", true)
                         : ($"{info.Name} looks like {KindName(info.Kind)}, so it was added there instead.", true));
                     if (info.Kind == FileKind.Requests) _chosen = info.Name;
                 }
@@ -425,6 +584,7 @@
     private void Remove(string name)
     {
         Planning.Delete(name);
+        if (_preferences == name) _preferences = "";
         if (_chosen == name)
             _chosen = Planning.Of(FileKind.Requests).FirstOrDefault()?.Name ?? "";
         _messages = new();
@@ -432,6 +592,8 @@
 
     private static string KindName(FileKind k) => k switch
     {
+        FileKind.Preferences => "separate scheduling preferences (step 1)",
+        FileKind.Reference => "a course/faculty reference (step 4)",
         FileKind.Requests => "a preference sheet (step 1)",
         FileKind.PastSchedule => "a past schedule (step 2)",
         FileKind.Rooms => "a rooms table (step 3)",
@@ -471,6 +633,8 @@
         try
         {
             _plan = build();
+            _proposal = null;
+                _baselineCourse = _plan.Placements.FirstOrDefault()?.Section.Course ?? "";
             _needsRebuild = false;
         }
         catch (Exception ex)
@@ -518,6 +682,7 @@
             p.Section.Difficult = s.Profile.Difficult;
         Planning.Faculty.Save();
         _needsRebuild = true;
+        _proposal = null;
     }
 
     private async Task DownloadAll() =>

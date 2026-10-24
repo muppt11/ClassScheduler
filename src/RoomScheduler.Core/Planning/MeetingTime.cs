@@ -38,6 +38,8 @@ namespace RoomScheduler
                 return days;
 
             string text = raw.Trim().ToUpperInvariant();
+            var singleDay = NamedDay(text);
+            if (singleDay != null) return new List<DayOfWeek> { singleDay.Value };
 
             if (text.Contains(',') || text.Contains(' ') || text.Contains('/'))
             {

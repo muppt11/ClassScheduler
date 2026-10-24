@@ -114,7 +114,7 @@ namespace RoomScheduler
                         DiscussionBuilding = Get("BLDG2"),
                         DiscussionRoom = RoomNumber(Get("RM2")),
                         Online = notes.StartsWith("Taught as a Web-based", StringComparison.OrdinalIgnoreCase) ||
-                                 Get("DAYS1").Length == 0,
+                                 (Get("DAYS1").Length == 0 && Get("BLDG1").Length == 0),
                         Hybrid = notes.StartsWith("Partially taught as a Web-based", StringComparison.OrdinalIgnoreCase)
                     });
                 }
@@ -130,6 +130,10 @@ namespace RoomScheduler
         public List<PastSection> For(string surname, string course) =>
             Latest(Sections.Where(s => s.Instructors.Contains(surname, StringComparer.OrdinalIgnoreCase) &&
                                        string.Equals(s.Course, course, StringComparison.OrdinalIgnoreCase)));
+
+        /// <summary>Physical room usage, including blended sections regardless of modality labels.</summary>
+        public List<PastSection> InRoom(string roomName) => Sections.Where(s =>
+            s.RoomName.Equals(roomName, StringComparison.OrdinalIgnoreCase)).ToList();
 
         public List<PastSection> ForInstructor(string surname) =>
             Latest(Sections.Where(s => s.Instructors.Contains(surname, StringComparer.OrdinalIgnoreCase)));

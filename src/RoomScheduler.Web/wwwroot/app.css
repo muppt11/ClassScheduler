@@ -426,3 +426,18 @@ table.tracktable td:not(:first-child), table.tracktable th:not(:first-child) { t
 .filerow.chosen { background: #fdf3ea; }
 .filerow label { margin: 0; }
 .files > .controls { padding: 12px 0 8px; }
+
+/* Keep scheduling help visible before and after uploading workbooks. */
+.scheduling-assistant { border: 1px solid #cfb8a3; border-radius: 8px; padding: 18px; margin: 12px 0 24px; background: #fffcf8; }
+.assistant-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.assistant-heading h2 { margin: 0; border: 0; }
+.assistant-badge { font-size: 11px; background: #e5f0e5; color: #25552d; border-radius: 12px; padding: 4px 9px; }
+.chat-history { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
+.chat-message { max-width: 90%; padding: 10px 14px; border-radius: 8px; font-size: 13px; }
+.chat-message p { margin: 4px 0 0; white-space: pre-wrap; }
+.assistant-message { background: #f0ebe5; align-self: flex-start; }
+.user-message { background: #e1edf8; align-self: flex-end; }
+.chat-composer { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.chat-input-label { width: 100%; font-weight: bold; font-size: 12px; }
+.chat-composer input { flex: 1; min-width: 200px; padding: 10px; }
+.assistant-proposal { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }

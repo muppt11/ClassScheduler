@@ -15,7 +15,7 @@ namespace RoomScheduler
     /// pass then moves sections into better rooms that turned out to be free.
     /// Anything a person should check is attached to the section as a flag.
     /// </summary>
-    public class Planner
+    public partial class Planner
     {
         private readonly List<Room> _rooms;
         private readonly Campus _campus;
@@ -88,6 +88,12 @@ namespace RoomScheduler
             workbook.MatchForms();
             var plan = new Plan { Semester = workbook.Semester, Workbook = workbook, Rules = Rules };
 
+            int unknownTracks = workbook.Sections.Count(s => !s.InstructorMissing && s.Track == FacultyTrack.Unknown &&
+                _faculty.Find(s.Surname)?.Track is null or FacultyTrack.Unknown);
+            if (unknownTracks > 0)
+                plan.GeneralFlags.Add(new ReviewFlag(FlagLevel.Info, ReviewFlag.NeedsInfo,
+                    $"{unknownTracks} sections have unknown faculty track. Import Faculty Reference or edit profiles; track priority and tenure-only rules require this information."));
+
             foreach (var form in workbook.UnmatchedForms)
                 plan.GeneralFlags.Add(new ReviewFlag(FlagLevel.Review, ReviewFlag.NeedsInfo,
                     $"Preference form from {form.Professor} for \"{form.Course}\" matches no section on the Classes App sheet."));
@@ -123,6 +129,16 @@ namespace RoomScheduler
             foreach (var p in plan.Placements)
                 Finish(p);
 
+            var scheduled = plan.Placements.Concat(plan.Discussions).Where(p => p.Time != null).ToList();
+            for (int i = 0; i < scheduled.Count; i++)
+                foreach (var other in scheduled.Skip(i + 1).Where(p => p.Time!.Overlaps(scheduled[i].Time!)))
+                {
+                    var current = scheduled[i];
+                    if ((current.Room != null && current.Room.DisplayName == other.Room?.DisplayName) ||
+                        (!current.IsDiscussion && !other.IsDiscussion && !current.Section.InstructorMissing &&
+                         current.Section.Surname == other.Section.Surname))
+                        throw new InvalidOperationException($"Schedule conflict: {current.Label} and {other.Label}.");
+                }
             return plan;
         }
 
@@ -147,8 +163,6 @@ namespace RoomScheduler
                 else if (s.Track != FacultyTrack.Unknown) s.Profile.Track = s.Track;
                 s.Difficult |= s.Profile.Difficult;
 
-                if (s.Track == FacultyTrack.Unknown)
-                    s.Flag(FlagLevel.Review, ReviewFlag.NeedsInfo, "Tenure or PTF is blank, so this section has the lowest priority.");
 
                 if (SchedulingRules.IsGraduate(s.Course) && s.Track == FacultyTrack.Professional)
                     s.Flag(FlagLevel.Review, ReviewFlag.Policy,
@@ -164,6 +178,8 @@ namespace RoomScheduler
 
             s.PastSections = s.InstructorMissing ? new() : _past.For(s.Surname, s.Course);
 
+            if (s.PastSections.Count == 0 && !s.Online)
+                s.Flag(FlagLevel.Review, ReviewFlag.History, "No matching instructor/course history; room assignment uses current size, baselines and preferences. Confirm it.");
             SizeFromHistory(s);
             if (s.Online)
             {
@@ -197,43 +213,44 @@ namespace RoomScheduler
         }
 
         /// <summary>
-        /// Compares the projected size with what really enrolled last time. A class
-        /// that drew far fewer students than projected is downsized by 15% and
-        /// flagged for review. One that drew more is sized up.
+        /// Compares the projected size with the median of active terms' mean section
+        /// enrollments, keeping the physical course-room baseline separate.
         /// </summary>
         private void SizeFromHistory(SectionRequest s)
         {
-            var inPerson = s.PastSections.Where(p => !p.Online && p.Enrollment > 0).ToList();
-            string source = "their sections";
-            if (inPerson.Count == 0)
+            // Keep latest instructor history for time/room continuity; use all active terms for size.
+            var history = _past.Sections.Where(p => p.Course.Equals(s.Course, StringComparison.OrdinalIgnoreCase) &&
+                !p.Online && p.Enrollment > 0 && TitlesMatch(p.Title, s.Title)).ToList();
+            var own = history.Where(p => p.Instructors.Contains(s.Surname, StringComparer.OrdinalIgnoreCase)).ToList();
+            if (own.Select(p => p.SemesterCode).Distinct().Count() >= 2) history = own;
+            var terms = history.GroupBy(p => p.SemesterCode)
+                .Select(g => g.Average(p => p.Enrollment)).OrderBy(v => v).ToList();
+            int actual = terms.Count == 0 ? 0 : (int)Math.Round(
+                terms.Count % 2 == 1 ? terms[terms.Count / 2] : (terms[terms.Count / 2 - 1] + terms[terms.Count / 2]) / 2);
+            s.PastEnrollment = actual > 0 ? actual : null;
+            s.SizeForRoom = s.ProjectedSize;
+            if (actual > 0)
             {
-                inPerson = _past.ForCourse(s.Course).Where(p => !p.Online && p.Enrollment > 0 &&
-                                                                 TitlesMatch(p.Title, s.Title)).ToList();
-                source = "all sections";
+                string source = $"median of {terms.Count} active semester(s): {actual}";
+                if (s.ProjectedSize <= 0) s.SizeForRoom = actual;
+                else if (actual < s.ProjectedSize * Rules.ActualFarBelowProjected)
+                {
+                    s.SizeForRoom = (int)Math.Ceiling(s.ProjectedSize * (1 - Rules.DownsizeShare));
+                    s.Flag(FlagLevel.Review, ReviewFlag.Size,
+                        $"Projected {s.ProjectedSize}; historical {source}. Downsized {Rules.DownsizeShare:0%} to {s.SizeForRoom}; check it.");
+                }
+                else if (actual > s.ProjectedSize * 1.1)
+                {
+                    s.SizeForRoom = actual;
+                    s.Flag(FlagLevel.Review, ReviewFlag.Size, $"Historical {source} exceeds projected {s.ProjectedSize}; sized up.");
+                }
             }
-            if (inPerson.Count == 0) return;
-
-            int actual = (int)Math.Round(inPerson.Average(p => p.Enrollment));
-            s.PastEnrollment = actual;
-            string when = inPerson[0].Semester;
-
-            if (s.ProjectedSize <= 0)
+            if (s.SizeForRoom <= 0)
             {
-                s.SizeForRoom = actual;
-                s.Flag(FlagLevel.Info, ReviewFlag.Size, $"No projected size given; using {when} enrollment ({actual}).");
-            }
-            else if (actual < s.ProjectedSize * Rules.ActualFarBelowProjected)
-            {
-                s.SizeForRoom = (int)Math.Ceiling(s.ProjectedSize * (1 - Rules.DownsizeShare));
+                s.SizeForRoom = Math.Max(1, Rules.RegistrarCap(Math.Max(s.MinimumRoomCapacity, s.PreferredRoomCapacity)));
+                if (s.SizeForRoom <= 1) s.SizeForRoom = Rules.UnknownEnrollmentSize;
                 s.Flag(FlagLevel.Review, ReviewFlag.Size,
-                    $"Projected {s.ProjectedSize}, but {when} enrolled only {actual} ({source}). " +
-                    $"Downsized {Rules.DownsizeShare:0%} to {s.SizeForRoom}; check it.");
-            }
-            else if (actual > s.ProjectedSize * 1.1)
-            {
-                s.SizeForRoom = actual;
-                s.Flag(FlagLevel.Review, ReviewFlag.Size,
-                    $"{when} enrolled {actual}, more than the projected {s.ProjectedSize}. Sized up to {actual}.");
+                    $"No positive projected or historical enrollment; provisional size {s.SizeForRoom}. Check enrollment and course baseline.");
             }
         }
 
@@ -270,15 +287,32 @@ namespace RoomScheduler
                     }
                     else if (s.Form != null)
                     {
-                        s.Flag(FlagLevel.Problem, ReviewFlag.NeedsInfo,
+                        s.Flag(FlagLevel.Review, ReviewFlag.NeedsInfo,
                             "Preference form has no time the app can read, and there is no past schedule to fall back on. Reach out to them.");
                     }
                     else
                     {
-                        s.Flag(FlagLevel.Problem, ReviewFlag.NeedsInfo,
+                        s.Flag(FlagLevel.Review, ReviewFlag.NeedsInfo,
                             "No preference form and no past schedule, likely a new instructor. Reach out to them for times.");
                     }
                 }
+            }
+
+            if (options.Count == 0)
+            {
+                // Provisional standard slots, subject to the same hard constraints as requests.
+                int credits = s.Course.Length > 0 && char.IsDigit(s.Course[0]) ? s.Course[0] - '0' : 3;
+                if (credits < 1) credits = 3;
+                foreach (string days in new[] { "MWF", "TTH" })
+                    for (int hour = 8; hour <= 17; hour++)
+                    {
+                        var start = TimeSpan.FromHours(hour);
+                        var time = new MeetingTime(MeetingTime.ParseDays(days), start,
+                            start + TimeSpan.FromHours((double)credits / MeetingTime.ParseDays(days).Count));
+                        if (!s.Wishes.Blocked.Any(b => b.Time.Overlaps(time)))
+                            options.Add(new TimeOption(time, 1, "provisional standard slot; confirm with instructor"));
+                    }
+                s.Flag(FlagLevel.Review, ReviewFlag.Time, "No usable time history or preference; assigned a provisional feasible slot for review.");
             }
 
             CheckCreditHours(s, options);
@@ -466,7 +500,7 @@ namespace RoomScheduler
         /// <summary>Hard rules on rooms: size, department-only labs, and accommodations.</summary>
         private bool RoomAllowed(SectionRequest s, Room room)
         {
-            if (room.Capacity < s.SizeForRoom) return false;
+            if (room.Capacity < Math.Max(s.SizeForRoom, s.MinimumRoomCapacity)) return false;
             if (Rules.Offline.IsOffline(room)) return false;
 
             // Pod rooms and project labs in GDC are not lecture rooms unless asked for by name.
@@ -557,7 +591,8 @@ namespace RoomScheduler
             // (capacity minus 10%) 50-75% over the class is "Min high", past 75%
             // "Max high"; both cost, and both are flagged once placed.
             double target = room.Capacity * (1 - Rules.RegistrarHeadroom);
-            double over = target - s.SizeForRoom;
+            double desired = Math.Max(s.SizeForRoom, Math.Max(s.MinimumRoomCapacity, s.PreferredRoomCapacity) * (1 - Rules.RegistrarHeadroom));
+            double over = target - desired;
             score -= (int)(over >= 0 ? over : -over * 3);
             string fit = Rules.FitIndicator(room.Capacity, s.SizeForRoom);
             if (fit == "Max high") score -= MaxHighPenalty;
@@ -827,6 +862,9 @@ namespace RoomScheduler
         private void Finish(Placement p)
         {
             var s = p.Section;
+            foreach (var flag in p.PlacementFlags) s.Flags.Remove(flag);
+            p.PlacementFlags.Clear();
+            int firstFlag = s.Flags.Count;
             if (p.Room != null)
             {
                 p.Fit = Rules.FitIndicator(p.Room.Capacity, s.SizeForRoom);
@@ -835,7 +873,8 @@ namespace RoomScheduler
                 string over = $"{Rules.OverReported(p.Room.Capacity, s.SizeForRoom):+0%;-0%}";
                 if (p.Fit == "Max high")
                     s.Flag(FlagLevel.Review, ReviewFlag.Size,
-                        $"Room too big: {p.Room.DisplayName} reports {p.RegistrarCap} for an expected {s.SizeForRoom} ({over}). No closer room was free.");
+                        $"Room too big: {p.Room.DisplayName} reports {p.RegistrarCap} for an expected {s.SizeForRoom} ({over}). " +
+                        (p.Option?.Source == "manual override" ? "Chosen by manual override; confirm the exception." : "No closer room was free."));
                 else if (p.Fit == "Min high")
                     s.Flag(FlagLevel.Info, ReviewFlag.Size,
                         $"Room on the big side: {p.Room.DisplayName} reports {p.RegistrarCap} for an expected {s.SizeForRoom} ({over}).");
@@ -853,6 +892,7 @@ namespace RoomScheduler
                 if (p.Option != null && p.Option.Rank > 1 && s.Wishes.Times.Count > 0)
                     s.Flag(FlagLevel.Info, ReviewFlag.Time, $"Got their {Ordinal(p.Option.Rank)} preference, not their first.");
             }
+            p.PlacementFlags.AddRange(s.Flags.Skip(firstFlag));
         }
 
         private static string Ordinal(int n) => n switch { 1 => "1st", 2 => "2nd", 3 => "3rd", _ => $"{n}th" };

@@ -24,6 +24,8 @@ namespace RoomScheduler
         /// <summary>Anything else added under Additional files, kept for reference.</summary>
         Other,
 
+        Preferences,
+        Reference,
         Unknown
     }
 
@@ -81,6 +83,7 @@ namespace RoomScheduler
         public HashSet<string> ActiveHistory { get; } = new(StringComparer.OrdinalIgnoreCase);
         private HashSet<string> _historyTurnedOff = new(StringComparer.OrdinalIgnoreCase);
 
+        private Planner? _planner;
         public Planner.Plan? LatestPlan { get; private set; }
         public string LatestSource { get; private set; } = "";
 
@@ -180,6 +183,11 @@ namespace RoomScheduler
                 return new LibraryFile(name, FileKind.Requests,
                     $"{Fallback(workbook.Semester, "semester not named")}: {workbook.Sections.Count} sections, {workbook.Forms.Count} preference forms", saved);
 
+            if (workbook.Forms.Count > 0)
+                return new LibraryFile(name, FileKind.Preferences, $"{workbook.Forms.Count} preference forms", saved);
+            if (ReferenceSheets.HasReferences(sheets))
+                return new LibraryFile(name, FileKind.Reference, "course/faculty reference (documented template)", saved);
+
             var rooms = Room.FromFeatureWorkbook(sheets, _data.GdcRoomsCsv, Rules);
             if (rooms != null && rooms.Count > 0)
                 return new LibraryFile(name, FileKind.Rooms, $"{rooms.Count(r => !r.DepartmentOnly)} rooms", saved);
@@ -244,6 +252,11 @@ namespace RoomScheduler
             var info = Classify(name, bytes, saved, keepOther: section == FileKind.Other);
             if (info.Kind == FileKind.Unknown) return info;
 
+            var existing = Files().FirstOrDefault(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (existing != null && existing.Kind != info.Kind)
+                return new LibraryFile(name, FileKind.Unknown,
+                    "that name is already used by a different type of file; rename this file to keep both", saved);
+            if (existing != null) name = existing.Name;
             _store.Set("file:" + name, Convert.ToBase64String(bytes));
             if (info.Kind == FileKind.Other) _store.Set("other:" + name, "1");
             else _store.Remove("other:" + name);
@@ -340,17 +353,49 @@ namespace RoomScheduler
 
         // ------------------------------------------------------------ planning
 
-        public Planner.Plan Build(string fileName)
+        public Planner.Plan Build(string fileName, string? preferencesFile = null)
         {
             var workbook = DepartmentWorkbook.FromSheets(Sheets(fileName));
             if (workbook.Sections.Count == 0)
                 throw new InvalidDataException(
                     "No sections found. The workbook needs a sheet with a Title column, like the department's Classes App sheet.");
 
-            LatestPlan = new Planner(Rooms, Campus, Past, Faculty, Rules, DepartmentHistory).Build(workbook);
+            if (!string.IsNullOrEmpty(preferencesFile))
+            {
+                workbook.Forms.Clear();
+                workbook.Forms.AddRange(DepartmentWorkbook.FromSheets(Sheets(preferencesFile)).Forms);
+            }
+            foreach (var f in Of(FileKind.Reference).OrderBy(f => f.Saved))
+                ReferenceSheets.Apply(Sheets(f.Name), workbook, Faculty);
+            ReferenceSheets.Apply(Sheets(fileName), workbook, Faculty);
+            foreach (var section in workbook.Sections)
+            {
+                var value = _store.Get(BaselineKey(workbook.Semester, section.Course));
+                if (value == null) continue;
+                var baseline = JsonSerializer.Deserialize<int[]>(value)!;
+                section.MinimumRoomCapacity = baseline[0];
+                section.PreferredRoomCapacity = baseline[1];
+            }
+            LatestPreferences = preferencesFile;
+            _planner = new Planner(Rooms, Campus, Past, Faculty, Rules, DepartmentHistory);
+            LatestPlan = _planner.Build(workbook);
             LatestSource = fileName;
             Faculty.Save();
             return LatestPlan;
+        }
+
+        public Planner.OverrideProposal ProposeOverride(string request, bool allowOversizedRoom) =>
+            (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ProposeOverride(LatestPlan!, request, allowOversizedRoom);
+        public void ApplyOverride(Planner.OverrideProposal proposal) =>
+            (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ApplyOverride(LatestPlan!, proposal);
+
+        public string? LatestPreferences { get; private set; }
+        private static string BaselineKey(string semester, string course) => "baseline:" + semester + ":" + course;
+        public void SetSemesterBaseline(string semester, string course, int minimum, int preferred)
+        {
+            if (minimum < 0 || preferred < 0 || (preferred > 0 && preferred < minimum))
+                throw new ArgumentException("Capacities must be nonnegative; preferred must be at least minimum.");
+            _store.Set(BaselineKey(semester, course), JsonSerializer.Serialize(new[] { minimum, preferred }));
         }
 
         public static string SizeText(long bytes) =>
