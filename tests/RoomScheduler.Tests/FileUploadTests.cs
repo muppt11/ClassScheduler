@@ -240,7 +240,8 @@ public class FileUploadTests
             foreach (var row in sheets[index].Rows) part.AddRow(row);
             return Xlsx.Write(new[] { part });
         }
-        Assert.Equal(FileKind.Requests, s.Save("classes.xlsx", Part(0), FileKind.Requests).Kind);
+        var classesBytes = Part(0);
+        Assert.Equal(FileKind.Requests, s.Save("classes.xlsx", classesBytes, FileKind.Requests).Kind);
         Assert.Equal(FileKind.Preferences, s.Save("preferences.xlsx", Part(1), FileKind.Requests).Kind);
         var reopened = NewSession(store);
         Assert.Equal(2, reopened.Files().Count);
@@ -249,7 +250,7 @@ public class FileUploadTests
         Assert.All(plan.Placements, p => Assert.NotNull(p.Room));
         Assert.Empty(plan.Workbook.UnmatchedForms);
         Assert.Equal(FileKind.Unknown, s.Save("classes.xlsx", Part(1), FileKind.Requests).Kind);
-        Assert.Equal(Part(0), s.FileBytes("classes.xlsx"));
+        Assert.Equal(classesBytes, s.FileBytes("classes.xlsx"));
     }
 
     [Fact]
