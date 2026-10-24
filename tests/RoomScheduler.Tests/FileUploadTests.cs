@@ -10,7 +10,7 @@ namespace RoomScheduler.Tests;
 /// </summary>
 public class FileUploadTests
 {
-    private static PlanningSession NewSession(MemoryStore? store = null)
+    private static PlanningSession NewSession(IKeyValueStore? store = null)
     {
         var session = new PlanningSession();
         session.Initialize(store ?? new MemoryStore(), DataFiles.FromDataFolder());
@@ -299,6 +299,123 @@ public class FileUploadTests
         session.Save("requests.xlsx", Requests(), FileKind.Requests);
         var error = Assert.Throws<InvalidDataException>(() => session.Build("requests.xlsx"));
         Assert.Contains("room inventory is empty", error.Message);
+    }
+
+    [Fact]
+    public void Missing_selected_preferences_file_is_rejected_without_replacing_the_current_plan()
+    {
+        var s=NewSession(); s.Save("classes.xlsx",Requests(),FileKind.Requests); var plan=s.Build("classes.xlsx");
+        Assert.Throws<InvalidDataException>(()=>s.Build("classes.xlsx","missing.xlsx"));
+        Assert.Same(plan,s.LatestPlan); Assert.Null(s.LatestPreferences);
+    }
+
+    [Fact]
+    public void Case_variant_replacement_returns_the_canonical_stored_filename()
+    {
+        var s=NewSession(); s.Save("Classes.xlsx",Requests(),FileKind.Requests);
+        var result=s.Save("classes.XLSX",Requests(),FileKind.Requests);
+        Assert.Equal("Classes.xlsx",result.Name); Assert.Equal("Classes.xlsx",s.Files().Single().Name);
+    }
+
+    [Fact]
+    public void Semester_reference_override_wins_even_if_the_generic_row_comes_last()
+    {
+        var s=NewSession(); s.Save("classes.xlsx",Requests(),FileKind.Requests);
+        s.Save("reference.xlsx",Workbook(("Course Reference",new[] {
+            new[]{"Course","Minimum Room Capacity","Preferred Room Capacity","Semester"},
+            new[]{"314","175","200","Fall 2026"}, new[]{"314","150","160",""}
+        })),FileKind.Other);
+        var section=s.Build("classes.xlsx").Placements[0].Section;
+        Assert.Equal(175,section.MinimumRoomCapacity); Assert.Equal(200,section.PreferredRoomCapacity);
+    }
+
+    [Fact]
+    public void Room_upload_invalidates_manual_previews_until_the_schedule_is_rebuilt()
+    {
+        var s=NewSession(); s.Save("classes.xlsx",Requests(),FileKind.Requests); var plan=s.Build("classes.xlsx");
+        var p=plan.Placements[0]; var time=MeetingTime.Of("F",15,0,16,0);
+        var preview=s.ProposeMove(p,p.Room!,time,true);
+        s.Save("rooms.xlsx",RoomsTable(),FileKind.Rooms);
+        Assert.True(s.RequiresRebuild);
+        Assert.Throws<InvalidOperationException>(()=>s.ApplyOverride(preview));
+        Assert.Throws<InvalidOperationException>(()=>s.ProposeMove(p,s.Rooms.First(),time,true));
+        Assert.Same(plan,s.LatestPlan);
+        s.Build("classes.xlsx"); Assert.False(s.RequiresRebuild);
+    }
+
+    [Fact]
+    public void Faculty_offline_baseline_and_rule_edits_require_rebuilding_but_notes_do_not()
+    {
+        var s=NewSession(); s.Save("classes.xlsx",Requests(),FileKind.Requests); s.Build("classes.xlsx");
+        s.Save("map.pdf","map"u8.ToArray(),FileKind.Other); Assert.False(s.RequiresRebuild);
+        s.Faculty.All.First().Track=FacultyTrack.Unknown; s.Faculty.Save(); Assert.True(s.RequiresRebuild);
+        s.Build("classes.xlsx"); Assert.False(s.RequiresRebuild);
+        s.Rules.Offline.SetRoom(s.Rooms.First(),true,s.Rooms); Assert.True(s.RequiresRebuild);
+        s.Build("classes.xlsx"); s.SetSemesterBaseline("Fall 2026","314",140,160); Assert.True(s.RequiresRebuild);
+        s.Build("classes.xlsx"); s.Rules.AllowAlternateTimes=!s.Rules.AllowAlternateTimes; Assert.True(s.RequiresRebuild);
+    }
+
+    [Fact]
+    public void Reference_tabs_in_the_selected_preferences_workbook_are_applied()
+    {
+        var s=NewSession(); s.Save("classes.xlsx",Requests(),FileKind.Requests);
+        var prefs=Xlsx.Read(new MemoryStream(Requests()))[1];
+        s.Save("prefs.xlsx",Workbook((prefs.Name,prefs.Rows.Select(r=>r.ToArray()).ToArray()),
+            ("Course Reference",new[]{new[]{"Course","Minimum Room Capacity"},new[]{"314","175"}})),FileKind.Requests);
+        Assert.Equal(175,s.Build("classes.xlsx","prefs.xlsx").Placements[0].Section.MinimumRoomCapacity);
+    }
+
+    private sealed class FailingStore : IKeyValueStore
+    {
+        public MemoryStore Inner { get; }=new();
+        public string? FailNextKey { get; set; }
+        public string? Get(string key)=>Inner.Get(key);
+        public void Set(string key,string value)
+        {
+            if(key==FailNextKey) { FailNextKey=null; throw new InvalidOperationException("Storage quota exceeded"); }
+            Inner.Set(key,value);
+        }
+        public void Remove(string key)=>Inner.Remove(key);
+    }
+
+    [Fact]
+    public void Failed_file_replacement_restores_original_bytes_index_and_history_choice()
+    {
+        var store=new FailingStore(); var s=NewSession(store); var bytes=PastSchedule("20259");
+        s.Save("history.xlsx",bytes,FileKind.PastSchedule); s.SetHistoryActive("history.xlsx",false);
+        var before=store.Inner.Values.ToDictionary(x=>x.Key,x=>x.Value);
+        store.FailNextKey="files";
+        Assert.Throws<InvalidOperationException>(()=>s.Save("history.xlsx",PastSchedule("20262"),FileKind.PastSchedule));
+        Assert.Equal(bytes,s.FileBytes("history.xlsx")); Assert.Empty(s.Past.Sections);
+        Assert.Equal(before.OrderBy(x=>x.Key),store.Inner.Values.OrderBy(x=>x.Key));
+    }
+
+    [Fact]
+    public void Failed_new_upload_leaves_no_unindexed_file_and_failed_delete_restores_it()
+    {
+        var store=new FailingStore(); var s=NewSession(store); store.FailNextKey="files";
+        Assert.Throws<InvalidOperationException>(()=>s.Save("requests.xlsx",Requests(),FileKind.Requests));
+        Assert.Empty(s.Files()); Assert.Null(s.FileBytes("requests.xlsx"));
+        var bytes=Requests(); s.Save("requests.xlsx",bytes,FileKind.Requests); store.FailNextKey="files";
+        Assert.Throws<InvalidOperationException>(()=>s.Delete("requests.xlsx"));
+        Assert.Equal(bytes,s.FileBytes("requests.xlsx")); Assert.Single(s.Files());
+    }
+
+    [Fact]
+    public void Failed_history_choice_save_does_not_change_the_history_in_memory()
+    {
+        var store=new FailingStore(); var s=NewSession(store); s.Save("history.xlsx",PastSchedule(),FileKind.PastSchedule);
+        store.FailNextKey="history-off";
+        Assert.Throws<InvalidOperationException>(()=>s.SetHistoryActive("history.xlsx",false));
+        Assert.Single(s.Past.Sections); Assert.Contains("history.xlsx",s.ActiveHistory);
+    }
+
+    [Fact]
+    public void Room_usage_is_resolved_by_room_name_after_inventory_objects_are_reloaded()
+    {
+        var s=NewSession(); s.Save("classes.xlsx",Requests(),FileKind.Requests); var plan=s.Build("classes.xlsx");
+        var assigned=plan.Placements[0]; var replacement=new Room {Building=assigned.Room!.Building,RoomNumber=assigned.Room.RoomNumber,Capacity=assigned.Room.Capacity};
+        Assert.Contains(assigned,plan.InRoom(replacement));
     }
 
 }

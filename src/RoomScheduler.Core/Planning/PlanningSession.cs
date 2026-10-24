@@ -87,6 +87,9 @@ namespace RoomScheduler
         private Planner? _planner;
         public Planner.Plan? LatestPlan { get; private set; }
         public string LatestSource { get; private set; } = "";
+        private bool _inputsChanged;
+        private string? _builtRules;
+        public bool RequiresRebuild => LatestPlan != null && (_inputsChanged || _builtRules != JsonSerializer.Serialize(Rules));
 
         /// <summary>Largest file kept. Browser storage holds about 5 MB in all.</summary>
         public const int MaxFileBytes = 3 * 1024 * 1024;
@@ -103,8 +106,8 @@ namespace RoomScheduler
 
             Campus = Campus.FromCsvText(data.BuildingsCsv);
             DepartmentHistory = CourseHistory.FromCsvText(data.CourseHistoryCsv);
-            Faculty = new FacultyStore(store.Get("faculty"), json => store.Set("faculty", json));
-            Rules.Offline = OfflineRooms.FromJson(store.Get("offline"), json => store.Set("offline", json));
+            Faculty = new FacultyStore(store.Get("faculty"), json => SaveSetting("faculty", json));
+            Rules.Offline = OfflineRooms.FromJson(store.Get("offline"), json => SaveSetting("offline", json));
             _historyTurnedOff = new(JsonSerializer.Deserialize<List<string>>(store.Get("history-off") ?? "[]") ?? new(),
                                     StringComparer.OrdinalIgnoreCase);
 
@@ -119,7 +122,29 @@ namespace RoomScheduler
         private List<StoredFile> Index() =>
             JsonSerializer.Deserialize<List<StoredFile>>(_store.Get("files") ?? "[]") ?? new();
 
-        private void SaveIndex(List<StoredFile> index) => _store.Set("files", JsonSerializer.Serialize(index));
+        // Browser quota errors must not leave a replacement half-written or an index
+        // pointing at deleted bytes. localStorage writes are atomic per key only.
+        private void WriteStorage(params (string Key, string? Value)[] updates)
+        {
+            var before = updates.Select(u => (u.Key, Value: _store.Get(u.Key))).ToList();
+            try
+            {
+                foreach (var update in updates)
+                    if (update.Value == null) _store.Remove(update.Key); else _store.Set(update.Key, update.Value);
+            }
+            catch (Exception writeError)
+            {
+                var failures = new List<Exception>();
+                foreach (var previous in before.AsEnumerable().Reverse())
+                {
+                    try { if (previous.Value == null) _store.Remove(previous.Key); else _store.Set(previous.Key, previous.Value); }
+                    catch (Exception rollbackError) { failures.Add(rollbackError); }
+                }
+                if (failures.Count > 0)
+                    throw new InvalidOperationException("Saving failed and the previous files could not be fully restored. Reload and check the file list.", new AggregateException(failures.Prepend(writeError)));
+                throw;
+            }
+        }
 
         /// <summary>A saved file's bytes, for downloading it again.</summary>
         public byte[]? FileBytes(string name) =>
@@ -153,6 +178,25 @@ namespace RoomScheduler
             _described[f.Name] = info;
             return info;
         }
+
+        private void SaveSetting(string key, string value)
+        {
+            bool changed = _store.Get(key) != value;
+            _store.Set(key, value);
+            if (changed) MarkInputsChanged();
+        }
+
+        private void MarkInputsChanged()
+        {
+            if (LatestPlan == null) return;
+            _inputsChanged = true;
+            Conversation.Sync(null);
+        }
+
+        private bool AffectsPlan(FileKind kind, string name) =>
+            kind is FileKind.Rooms or FileKind.LectureCapture or FileKind.PastSchedule or FileKind.Reference ||
+            kind == FileKind.Requests && name.Equals(LatestSource, StringComparison.OrdinalIgnoreCase) ||
+            kind == FileKind.Preferences && name.Equals(LatestPreferences, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// What a file is, from its contents, not its name or where it was added.
@@ -258,19 +302,22 @@ namespace RoomScheduler
                 return new LibraryFile(name, FileKind.Unknown,
                     "that name is already used by a different type of file; rename this file to keep both", saved);
             if (existing != null) name = existing.Name;
-            _store.Set("file:" + name, Convert.ToBase64String(bytes));
-            if (info.Kind == FileKind.Other) _store.Set("other:" + name, "1");
-            else _store.Remove("other:" + name);
-
+            info = info with { Name = name };
             var index = Index().Where(f => f.Name != name).ToList();
             index.Add(new StoredFile(name, saved));
-            SaveIndex(index);
+            var updates = new List<(string Key, string? Value)> {
+                ("file:" + name, Convert.ToBase64String(bytes)),
+                ("other:" + name, info.Kind == FileKind.Other ? "1" : null),
+                ("files", JsonSerializer.Serialize(index))
+            };
+            if (info.Kind == FileKind.PastSchedule)
+                updates.Add(("history-off", JsonSerializer.Serialize(_historyTurnedOff.Where(n => !n.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList())));
+            WriteStorage(updates.ToArray());
             _described[name] = info;
 
             if (info.Kind == FileKind.PastSchedule)
             {
                 _historyTurnedOff.Remove(name);
-                SaveHistoryChoice();
                 ReloadHistory();
             }
             else if (info.Kind is FileKind.Rooms or FileKind.LectureCapture)
@@ -278,31 +325,35 @@ namespace RoomScheduler
                 LoadRooms();
             }
 
+            if (AffectsPlan(info.Kind, name)) MarkInputsChanged();
+
             return info;
         }
 
         public void Delete(string name)
         {
-            var kind = Files().FirstOrDefault(f => f.Name == name)?.Kind;
-            _store.Remove("file:" + name);
-            _store.Remove("other:" + name);
-            SaveIndex(Index().Where(f => f.Name != name).ToList());
+            var file = Files().FirstOrDefault(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            name = file?.Name ?? name;
+            var kind = file?.Kind;
+            WriteStorage(("file:" + name, null), ("other:" + name, null),
+                ("files", JsonSerializer.Serialize(Index().Where(f => f.Name != name).ToList())));
             _described.Remove(name);
 
             if (kind == FileKind.PastSchedule) ReloadHistory();
             if (kind is FileKind.Rooms or FileKind.LectureCapture) LoadRooms();
+            if (kind != null && AffectsPlan(kind.Value, name)) MarkInputsChanged();
         }
 
         public void SetHistoryActive(string name, bool active)
         {
-            if (active) _historyTurnedOff.Remove(name);
-            else _historyTurnedOff.Add(name);
-            SaveHistoryChoice();
+            var turnedOff = new HashSet<string>(_historyTurnedOff, StringComparer.OrdinalIgnoreCase);
+            if (active) turnedOff.Remove(name);
+            else turnedOff.Add(name);
+            _store.Set("history-off", JsonSerializer.Serialize(turnedOff.ToList()));
+            _historyTurnedOff = turnedOff;
             ReloadHistory();
+            MarkInputsChanged();
         }
-
-        private void SaveHistoryChoice() =>
-            _store.Set("history-off", JsonSerializer.Serialize(_historyTurnedOff.ToList()));
 
         /// <summary>History = every past-schedule file not turned off, newest file first.</summary>
         private void ReloadHistory()
@@ -365,12 +416,17 @@ namespace RoomScheduler
 
             if (!string.IsNullOrEmpty(preferencesFile))
             {
+                var preferences = DepartmentWorkbook.FromSheets(Sheets(preferencesFile)).Forms;
+                if (preferences.Count == 0)
+                    throw new InvalidDataException($"No scheduling preference forms found in '{preferencesFile}'. Select an existing preferences file or use the tabs in the Classes App workbook.");
                 workbook.Forms.Clear();
-                workbook.Forms.AddRange(DepartmentWorkbook.FromSheets(Sheets(preferencesFile)).Forms);
+                workbook.Forms.AddRange(preferences);
             }
             foreach (var f in Of(FileKind.Reference).OrderBy(f => f.Saved))
                 ReferenceSheets.Apply(Sheets(f.Name), workbook, Faculty);
             ReferenceSheets.Apply(Sheets(fileName), workbook, Faculty);
+            if (!string.IsNullOrEmpty(preferencesFile) && !preferencesFile.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+                ReferenceSheets.Apply(Sheets(preferencesFile), workbook, Faculty);
             foreach (var section in workbook.Sections)
             {
                 var value = _store.Get(BaselineKey(workbook.Semester, section.Course));
@@ -379,23 +435,34 @@ namespace RoomScheduler
                 section.MinimumRoomCapacity = baseline[0];
                 section.PreferredRoomCapacity = baseline[1];
             }
+            var planner = new Planner(Rooms, Campus, Past, Faculty, Rules, DepartmentHistory);
+            var plan = planner.Build(workbook);
+            Faculty.Save();
+            _planner = planner;
+            LatestPlan = plan;
             LatestPreferences = preferencesFile;
-            _planner = new Planner(Rooms, Campus, Past, Faculty, Rules, DepartmentHistory);
-            LatestPlan = _planner.Build(workbook);
             Conversation.Sync(LatestPlan);
             LatestSource = fileName;
-            Faculty.Save();
+            _inputsChanged = false;
+            _builtRules = JsonSerializer.Serialize(Rules);
             return LatestPlan;
         }
 
+        private Planner CurrentPlanner()
+        {
+            if (_planner == null) throw new InvalidOperationException("Build a schedule first.");
+            if (RequiresRebuild) throw new InvalidOperationException("Planning inputs changed. Rebuild the schedule before previewing or applying changes.");
+            return _planner;
+        }
+
         public Planner.OverrideProposal ProposeOverride(string request, bool allowOversizedRoom) =>
-            (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ProposeOverride(LatestPlan!, request, allowOversizedRoom);
+            CurrentPlanner().ProposeOverride(LatestPlan!, request, allowOversizedRoom);
         public Planner.OverrideProposal ProposeMove(Placement target, Room room, MeetingTime time, bool allowOversizedRoom) =>
-            (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ProposeOverride(LatestPlan!, target, room, time, allowOversizedRoom);
+            CurrentPlanner().ProposeOverride(LatestPlan!, target, room, time, allowOversizedRoom);
         public Planner.OverrideProposal ProposeSwap(Placement first, Placement second, bool swapTimes, bool allowOversizedRoom) =>
-            (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ProposeSwap(LatestPlan!, first, second, swapTimes, allowOversizedRoom);
+            CurrentPlanner().ProposeSwap(LatestPlan!, first, second, swapTimes, allowOversizedRoom);
         public void ApplyOverride(Planner.OverrideProposal proposal) =>
-            (_planner ?? throw new InvalidOperationException("Build a schedule first.")).ApplyOverride(LatestPlan!, proposal);
+            CurrentPlanner().ApplyOverride(LatestPlan!, proposal);
 
         public string? LatestPreferences { get; private set; }
         private static string BaselineKey(string semester, string course) => "baseline:" + semester + ":" + course;
@@ -403,7 +470,7 @@ namespace RoomScheduler
         {
             if (minimum < 0 || preferred < 0 || (preferred > 0 && preferred < minimum))
                 throw new ArgumentException("Capacities must be nonnegative; preferred must be at least minimum.");
-            _store.Set(BaselineKey(semester, course), JsonSerializer.Serialize(new[] { minimum, preferred }));
+            SaveSetting(BaselineKey(semester, course), JsonSerializer.Serialize(new[] { minimum, preferred }));
         }
 
         public static string SizeText(long bytes) =>

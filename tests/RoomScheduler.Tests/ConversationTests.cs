@@ -441,4 +441,70 @@ public class ConversationTests
         Assert.Contains("schedule is unchanged",Last(f.Chat));
     }
 
+    [Fact]
+    public void Repeating_an_ambiguous_course_name_does_not_reuse_a_previous_section()
+    {
+        var f=Fixture(true); Send(f,"move comp arch to Tuesday at 2pm"); Send(f,"row 2"); Assert.NotNull(f.Chat.Proposal);
+        Send(f,"move comp arch to Thursday at 3pm");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("Which one",Last(f.Chat));
+    }
+
+    [Fact]
+    public void Pronoun_after_an_ambiguous_lookup_asks_for_a_section_instead_of_using_an_older_course()
+    {
+        var f=Fixture(true); Send(f,"where is data structures?"); Send(f,"where is comp arch?");
+        Send(f,"move it to Tuesday at 2pm");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("Which one",Last(f.Chat));
+    }
+
+    [Fact]
+    public void Unknown_named_course_never_moves_the_previous_course()
+    {
+        var f=Fixture(); Send(f,"move comp arch to Tuesday at 2pm");
+        Send(f,"move basket weaving to Thursday at 3pm");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("couldn't match",Last(f.Chat));
+    }
+
+    [Theory]
+    [InlineData("MTWTH", "MTWTH")]
+    [InlineData("MWTH", "MWTH")]
+    [InlineData("MF", "MF")]
+    public void Explicit_catalog_day_patterns_are_preserved(string days,string expected)
+    {
+        var f=Fixture(); Send(f,$"move comp arch to {days} at 2pm");
+        Assert.NotNull(f.Chat.Proposal);
+        Assert.Equal(expected,f.Chat.Proposal!.ProposedChanges.Single(c=>c.Placement.Section.Course=="429").Time.Pattern);
+    }
+
+    [Fact]
+    public void Multiple_time_ranges_are_not_silently_reduced_to_the_first_one()
+    {
+        var f=Fixture(); Send(f,"move comp arch to Tuesday 2pm-3pm or 4pm-5pm");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("clear meeting time",Last(f.Chat));
+    }
+
+    [Fact]
+    public void No_later_than_sets_an_end_bound_without_requiring_a_later_start()
+    {
+        var f=Fixture(); Send(f,"find comp arch a slot no later than 9am");
+        Assert.NotNull(f.Chat.Proposal);
+        var c=f.Chat.Proposal!.ProposedChanges.Single(c=>c.Placement.Section.Course=="429");
+        Assert.True(c.Time.End<=TimeSpan.FromHours(9));
+    }
+
+    [Fact]
+    public void Reversed_weekday_range_is_rejected_even_with_a_search_window()
+    {
+        var f=Fixture(); Send(f,"find comp arch a slot Friday through Monday after 2pm");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("forward",Last(f.Chat));
+    }
+
+    [Fact]
+    public void Oversized_source_row_number_is_a_clarification_not_an_overflow()
+    {
+        var f=Fixture(true); Send(f,"move comp arch to Tuesday at 2pm");
+        Send(f,"row 9999999999999999999999999");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("Which one",Last(f.Chat));
+    }
+
 }

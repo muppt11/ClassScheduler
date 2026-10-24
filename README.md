@@ -196,6 +196,15 @@ retains previews on “can you do that?” and requires the Apply button after r
 changes just because the user says yes. Rebuilding clears pending moves. Conversation history is
 kept in memory for this browser session and survives navigation, but not page reload.
 
+Changing inputs used by the plan (including room data, history, faculty, rules, and course
+baselines) requires a rebuild. The previous schedule remains visible with a notice, while
+chat changes and schedule downloads are disabled until it is rebuilt. Stale previews are
+cleared and rejected by the planning service. A failed rebuild retains the last valid plan.
+Missing or empty selected preference files produce an error rather than silently removing
+all preferences. Upload/replacement/deletion storage failures restore the previous saved files.
+Within a reference sheet, semester-specific baselines take precedence over generic rows
+regardless of their order.
+
 For the explicit command form, use a course number or exact title that identifies one section. If several sections share it,
 use `title / instructor / row N`, where N is the original spreadsheet row. Use explicit am/pm;
 a start time alone retains the section's existing per-meeting duration. Preview lists every

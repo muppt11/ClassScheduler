@@ -20,31 +20,31 @@
     {
         <div class="chat-suggestions" aria-label="Example requests">
             @foreach (var example in new[] { "What needs attention?", "Which classes have no room?", "What can you do?" })
-            { <button type="button" class="ghost" disabled="@(Disabled || _sending)" @onclick="() => SendMessage(example)">@example</button> }
+            { <button type="button" class="ghost" disabled="@(Blocked || _sending)" @onclick="() => SendMessage(example)">@example</button> }
         </div>
     }
     @if (Conversation.RequestContext is string context)
     {
-        <div class="chat-context"><p>@context</p><button type="button" class="ghost small" disabled="@(Disabled || _sending)" @onclick="CancelProposal">Reset request</button></div>
+        <div class="chat-context"><p>@context</p><button type="button" class="ghost small" disabled="@(Blocked || _sending)" @onclick="CancelProposal">Reset request</button></div>
     }
     @if (Conversation.Suggestions.Count > 0)
     {
         <div class="chat-suggestions" aria-label="Suggested replies">
             @foreach (var choice in Conversation.Suggestions)
             {
-                <button type="button" class="ghost" disabled="@(Disabled || _sending)" @onclick="() => SendMessage(choice)">@choice</button>
+                <button type="button" class="ghost" disabled="@(Blocked || _sending)" @onclick="() => SendMessage(choice)">@choice</button>
             }
         </div>
     }
     <form class="chat-composer" @onsubmit="SendChat" @onsubmit:preventDefault>
         <label class="chat-input-label" for="assistant-request">Message the scheduling assistant</label>
         <input id="assistant-request" @bind="_overrideText" @bind:event="oninput" placeholder="Ask for help or describe a room/time change…" autocomplete="off" />
-        <button type="submit" disabled="@(Disabled || _sending)">@(_sending ? "Checking…" : "Send")</button>
+        <button type="submit" disabled="@(Blocked || _sending)">@(_sending ? "Checking…" : "Send")</button>
     </form>
     @if (_sending) { <p role="status">Checking rooms, swap partners and scheduling constraints…</p> }
     <label class="inline"><input type="checkbox" @bind="_allowOversized" /> Allow an intentional oversized-room exception for the next request</label>
     <p class="hint">Uses the current schedule in this browser. Room-only swaps keep times; room-and-time swaps are labeled in the preview. Rebuild or reload resets manual moves.</p>
-    @if (Disabled) { <p class="warn">Rebuild the schedule to use your faculty changes before requesting a move.</p> }
+    @if (Blocked) { <p class="warn">Planning inputs changed. Rebuild on Semester plan before requesting or applying changes.</p> }
     @if (_proposal != null)
     {
         <div class="assistant-proposal">
@@ -57,7 +57,7 @@
                     { <tr><td>@change.Placement.Section.Title — @change.Placement.Section.Instructor<div class="sub">Source row @(change.Placement.Section.SourceRow + 1)</div></td><td>@change.BeforeRoom?.DisplayName @change.BeforeTime</td><td>@change.Room.DisplayName @change.Time</td></tr> }
                 </tbody>
             </table></div>
-            <button @onclick="ApplyOverride" disabled="@(Disabled || _sending)">Apply reviewed changes</button>
+            <button @onclick="ApplyOverride" disabled="@(Blocked || _sending)">Apply reviewed changes</button>
             <button class="ghost" @onclick="CancelProposal">Cancel</button>
         </div>
     }
@@ -76,16 +76,17 @@
         _shownMessages = Conversation.Messages.Count;
         await JS.InvokeVoidAsync("scrollChatToBottom", _chatLog);
     }
+    private bool Blocked => Disabled || Planning.RequiresRebuild;
     private SchedulingConversation Conversation => Planning.Conversation;
     private Planner.OverrideProposal? _proposal => Conversation.Proposal;
     private List<ChatMessage> _chatMessages => Conversation.Messages;
 
-    protected override void OnParametersSet() => Conversation.Sync(Planning.LatestPlan);
+    protected override void OnParametersSet() => Conversation.Sync(Planning.RequiresRebuild ? null : Planning.LatestPlan);
 
     private Task SendChat() => SendMessage(_overrideText);
     private async Task SendMessage(string request)
     {
-        if (Disabled || _sending || string.IsNullOrWhiteSpace(request)) return;
+        if (Blocked || _sending || string.IsNullOrWhiteSpace(request)) return;
         _overrideText = ""; _sending = true;
         StateHasChanged();
         await Task.Delay(40);
@@ -100,6 +101,7 @@
     }
     private async Task ApplyOverride()
     {
+        if (Blocked || _sending || _proposal == null) return;
         try
         {
             Planning.ApplyOverride(_proposal!);

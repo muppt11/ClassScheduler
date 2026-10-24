@@ -80,7 +80,8 @@ namespace RoomScheduler
                 Placements.SelectMany(p => p.Section.Flags.Select(f => (p, f)));
 
             public List<Placement> InRoom(Room room) =>
-                Placements.Concat(Discussions).Where(p => p.Room == room).OrderBy(p => p.Time!.Start).ToList();
+                Placements.Concat(Discussions).Where(p => p.Room?.DisplayName.Equals(room.DisplayName, StringComparison.OrdinalIgnoreCase) == true)
+                    .OrderBy(p => p.Time?.Start ?? TimeSpan.MaxValue).ToList();
         }
 
         public Plan Build(DepartmentWorkbook workbook)

@@ -22,7 +22,9 @@ public static class ReferenceSheets
             if (Col(course ? "Course" : "Professor") < 0 ||
                 (course ? Col("Minimum Room Capacity") < 0 && Col("Preferred Room Capacity") < 0 : Col("Tenure or PTF") < 0))
                 throw new ArgumentException($"Invalid {sheet.Name} headers; see the reference template in README.");
-            foreach (var row in sheet.Rows.Skip(1))
+            int semesterColumn = Col("Semester");
+            // Apply reusable rows first so semester-specific values don't depend on row order.
+            foreach (var row in sheet.Rows.Skip(1).OrderBy(r => course && semesterColumn >= 0 && semesterColumn < r.Count && r[semesterColumn].Trim().Length > 0 ? 1 : 0))
             {
                 string Get(string name) { int c = Col(name); return c >= 0 && c < row.Count ? row[c].Trim() : ""; }
                 if (course)

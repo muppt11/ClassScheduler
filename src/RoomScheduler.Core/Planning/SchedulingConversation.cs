@@ -16,6 +16,7 @@ public sealed partial class SchedulingConversation
     private Planner.Plan? _plan;
     private Placement? _target;
     private Placement? _lastTarget;
+    private List<Placement> _referencedCourses = new();
     private List<Placement> _candidates = new();
     private Room? _room;
     private bool _roomExplicit, _timeExplicit;
@@ -36,8 +37,8 @@ public sealed partial class SchedulingConversation
     {
         if (ReferenceEquals(_plan, plan)) return;
         bool hadRequest = _target != null || Proposal != null;
-        _plan = plan; ClearRequest(); _lastTarget = null;
-        if (hadRequest) Reply("The schedule was rebuilt. I've cleared the previous proposal so the next request uses the new assignments.");
+        _plan = plan; ClearRequest(); _lastTarget = null; _referencedCourses.Clear();
+        if (hadRequest) Reply(plan == null ? "Planning inputs changed. I've cleared the previous proposal; rebuild before requesting changes." : "The schedule was rebuilt. I've cleared the previous proposal so the next request uses the new assignments.");
     }
 
     public void Cancel()
@@ -167,9 +168,19 @@ public sealed partial class SchedulingConversation
         { Proposal = null; _moveOptions.Clear(); _swapOptions.Clear(); }
         // A new move starts fresh; replies such as ‘actually use GDC 2.216’ refine the pending move.
         var matches = FindCourses(courseText);
+        bool refersBack = Regex.IsMatch(courseText, @"\b(it|same course|that class|that course|this class|this course)\b", Ignore);
+        if (matches.Count == 0 && refersBack && _referencedCourses.Count > 1)
+            matches = _referencedCourses.ToList();
+        var namedMove = Regex.Match(courseText, @"\b(?:move|put|reschedule|relocate|shift)\s+(.+?)\s+(?:to|into|in|on|at)\b", Ignore);
+        if (matches.Count == 0 && namedMove.Success && !refersBack &&
+            !Regex.IsMatch(namedMove.Groups[1].Value, @"^(?:the )?(?:class|course|section|room|time)$", Ignore))
+        {
+            ClearRequest(); _lastTarget = null; _referencedCourses.Clear();
+            Reply($"I couldn't match ‘{namedMove.Groups[1].Value}’ to a course in this schedule. Give me its course number or title. Your schedule is unchanged."); return;
+        }
         if (matches.Count == 0 && _lastTarget != null && Regex.IsMatch(text, @"\b(it|same course|that class|that course)\b", Ignore))
         { if (_target != null && _target != _lastTarget) ClearRequest(); _target = _lastTarget; }
-        if (partnerQuery != null || move && matches.Count > 0 && (_target == null || !matches.Contains(_target))) ClearRequest();
+        if (partnerQuery != null || move && matches.Count > 0 && (matches.Count > 1 || _target == null || !matches.Contains(_target))) ClearRequest();
         if (swap)
         {
             _swapRequested = true;
@@ -233,6 +244,7 @@ public sealed partial class SchedulingConversation
             }
         }
         _lastTarget = _target;
+        _referencedCourses = new() { _target };
         if (_target.Section.Online) { Reply($"{_target.Section.Title} is marked online, so it has no physical classroom. Change its modality before assigning a room."); return; }
 
         string details = _pendingDetails.Length > 0 ? _pendingDetails : text;
@@ -247,6 +259,9 @@ public sealed partial class SchedulingConversation
                 $"or the CS-controlled GDC room hours (from {MeetingTime.ClockTime(_plan.Rules.CsOwnsGdcFrom)}). Which do you mean?", GraduateChoice, GdcChoice); return;
         }
         _reserved = false;
+        var requestedDays = Regex.Match(details, @"\b(Monday|Tuesday|Wednesday|Thursday|Friday)\s+(?:through|to)\s+(Monday|Tuesday|Wednesday|Thursday|Friday)\b", Ignore);
+        if (requestedDays.Success && Enum.Parse<DayOfWeek>(requestedDays.Groups[1].Value, true) > Enum.Parse<DayOfWeek>(requestedDays.Groups[2].Value, true))
+        { Reply("The weekday range must run forward within the week, for example Monday through Thursday. Which days should I use?"); return; }
         string exactDetails = ReadFilters(details, rooms);
         if (Regex.IsMatch(exactDetails, @"\b(after|before|by)\s+\d", Ignore))
         { Reply("Please include am or pm for that time window, for example ‘after 2pm’ or ‘before 11am’. Nothing has changed."); return; }
@@ -387,7 +402,7 @@ public sealed partial class SchedulingConversation
         var courses = FindCourses(text);
         if (courses.Count == 0 && (_target ?? _lastTarget) is Placement last &&
             Regex.IsMatch(text, @"\b(it|this course|that course|this class|that class)\b", Ignore)) courses.Add(last);
-        if (courses.Count == 1) _lastTarget = courses[0];
+        if (courses.Count > 0) { _referencedCourses = courses.ToList(); _lastTarget = courses.Count == 1 ? courses[0] : null; }
         if (courses.Count > 0)
         {
             bool why = Regex.IsMatch(text, @"\b(why|explain|size|enrollment|capacity)\b", Ignore);
@@ -433,7 +448,7 @@ public sealed partial class SchedulingConversation
         var index = Regex.Match(text.Trim(), @"^(?:option |number )?(\d+)[.)]?$", Ignore);
         if (index.Success && int.TryParse(index.Groups[1].Value, out int n) && n > 0 && n <= choices.Count) return choices[n - 1];
         var rows = Regex.Match(text, @"\brow\s+(\d+)\b", Ignore);
-        if (rows.Success) return choices.FirstOrDefault(p => p.Section.SourceRow + 1 == int.Parse(rows.Groups[1].Value));
+        if (rows.Success) return int.TryParse(rows.Groups[1].Value, out int row) ? choices.FirstOrDefault(p => p.Section.SourceRow + 1 == row) : null;
         var matches = choices.Where(p => text.Contains(p.Section.Instructor, StringComparison.OrdinalIgnoreCase) ||
             Regex.IsMatch(text, $@"\b{Regex.Escape(p.Section.Surname)}\b", Ignore)).ToList();
         return matches.Count == 1 ? matches[0] : null;
@@ -454,7 +469,7 @@ public sealed partial class SchedulingConversation
 
     private static MeetingTime? ParseTime(string text, MeetingTime? current)
     {
-        var named = Regex.Matches(text, @"\b(monday|tuesday|wednesday|thursday|friday|mon|tue|wed|thu|fri|MWF|TTH|MW|TH|M|T|W|F)\b", Ignore);
+        var named = Regex.Matches(text, @"\b(monday|tuesday|wednesday|thursday|friday|mon|tue|wed|thu|fri|(?:TH|M|T|W|F)+)\b", Ignore);
         var days = named.SelectMany(m => MeetingTime.ParseDays(m.Value)).Distinct().ToList();
         var dayRange = Regex.Match(text, @"\b(Monday|Tuesday|Wednesday|Thursday|Friday)\s+(?:through|to)\s+(Monday|Tuesday|Wednesday|Thursday|Friday)\b", Ignore);
         if (dayRange.Success)
@@ -467,13 +482,14 @@ public sealed partial class SchedulingConversation
         if (pattern.Length == 0) return null;
         var range = Regex.Match(text, @"\b\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)?\s*[-–]\s*\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)\b", Ignore);
         var clocks = Regex.Matches(text, @"\b\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)\b", Ignore);
-        if (clocks.Count > 1 && !range.Success) return null;
+        if (clocks.Count > (range.Success ? 2 : 1)) return null;
         var clock = range.Success ? range : Regex.Match(text, @"\b\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)(?:\s*[-–]\s*\d{1,2}(?::[0-5]\d)?\s*(?:am|pm))?\b", Ignore);
         if (clock.Success)
         {
             string value = clock.Value.Replace('–', '-');
-            return PreferenceParser.FindTimes($"{pattern} {(value.Contains('-') ? "" : "at ")}{value}",
-                value.Contains('-') ? null : current?.Duration).Select(t => t.Time).SingleOrDefault();
+            var times = PreferenceParser.FindTimes($"{pattern} {(value.Contains('-') ? "" : "at ")}{value}",
+                value.Contains('-') ? null : current?.Duration, MeetingTime.ParseDays(pattern));
+            return times.Count == 1 ? times[0].Time : null;
         }
         return days.Count > 0 && current != null ? new MeetingTime(days, current.Start, current.End) : null;
     }

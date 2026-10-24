@@ -173,8 +173,9 @@ public sealed partial class SchedulingConversation
         if (Regex.IsMatch(text, @"\b(?:allow|okay to|ok to) (?:moving|displacing|move) other (?:classes|sections|courses)\b", Ignore)) _filters.NoDisplacement = false;
         if (Regex.IsMatch(text, @"\b(smaller|bigger|larger) (?:class)?room\b", Ignore))
         { _filters.RoomSize = Regex.IsMatch(text, @"\bsmaller\b", Ignore) ? -1 : 1; _findRoom = true; if (!_roomExplicit) _room = null; }
-        if (Regex.IsMatch(text, @"\b(later|earlier)\b", Ignore))
-        { _filters.Direction = Regex.IsMatch(text, @"\bearlier\b", Ignore) ? -1 : 1; _filters.SameTime = false; _findSlot = true; _timeExplicit = false; }
+        string relativeText = Regex.Replace(text, @"\bno (?:earlier|later) than\b", "", Ignore);
+        if (Regex.IsMatch(relativeText, @"\b(later|earlier)\b", Ignore))
+        { _filters.Direction = Regex.IsMatch(relativeText, @"\bearlier\b", Ignore) ? -1 : 1; _filters.SameTime = false; _findSlot = true; _timeExplicit = false; }
         if (Regex.IsMatch(text, @"\b(any time|any day)\b", Ignore))
         { _filters.After = _filters.Before = null; _filters.Days = null; _filters.ExcludedDays.Clear(); _filters.Direction = 0; _filters.SameTime = false; }
 
@@ -195,7 +196,7 @@ public sealed partial class SchedulingConversation
             _findSlot = true; _timeExplicit = false;
             return " ";
         }, Ignore);
-        var named = Regex.Matches(remaining, @"\b(Monday|Tuesday|Wednesday|Thursday|Friday|Mon|Tue|Wed|Thu|Fri|MWF|TTH|MW|TH)\b", Ignore);
+        var named = Regex.Matches(remaining, @"\b(Monday|Tuesday|Wednesday|Thursday|Friday|Mon|Tue|Wed|Thu|Fri|(?:TH|M|T|W|F)+)\b", Ignore);
         if (_findSlot && named.Count > 0)
         {
             var days = named.SelectMany(m => MeetingTime.ParseDays(m.Value)).Distinct().OrderBy(d => d).ToList();

@@ -183,15 +183,15 @@
         <div><strong>@_plan.Placements.Count(p => p.Fit == "Max high")</strong> rooms max high</div>
         <div class="right">
             <button class="ghost" @onclick="Rebuild" disabled="@_busy" title="Run the schedule again with the current faculty profiles">Rebuild</button>
-            <button @onclick="DownloadAll">Download workbook</button>
-            <button class="ghost" @onclick="DownloadGrids">Room calendars only</button>
+            <button @onclick="DownloadAll" disabled="@(_needsRebuild || Planning.RequiresRebuild)">Download workbook</button>
+            <button class="ghost" @onclick="DownloadGrids" disabled="@(_needsRebuild || Planning.RequiresRebuild)">Room calendars only</button>
         </div>
     </div>
 
-    @if (_needsRebuild)
+    @if (_needsRebuild || Planning.RequiresRebuild)
     {
         <div class="problems rebuild">
-            Faculty changed (difficult or track). Rebuild to apply.
+            Planning inputs or faculty settings changed. This is the previous schedule; rebuild to apply the changes.
             <button @onclick="Rebuild" disabled="@_busy">@(_busy ? "Working" : "Rebuild now")</button>
         </div>
     }
