@@ -290,4 +290,14 @@ public class FileUploadTests
         Assert.Equal("Fall 2025", s.Past.Semesters.First());
     }
 
+    [Fact]
+    public void Empty_room_inventory_is_reported_before_building_an_empty_schedule()
+    {
+        var session = new PlanningSession();
+        session.Initialize(new MemoryStore(), new DataFiles("", "", "", "", ""));
+        session.Save("requests.xlsx", Requests(), FileKind.Requests);
+        var error = Assert.Throws<InvalidDataException>(() => session.Build("requests.xlsx"));
+        Assert.Contains("room inventory is empty", error.Message);
+    }
+
 }

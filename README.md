@@ -94,7 +94,13 @@ Before 12:30, CS's four big GDC rooms need the registrar's agreement, so those b
   Historical enrollment is the median of per-semester mean enrollments across active uploads.
   Matching instructor history is used when it spans at least two terms; otherwise matching course/title
   history is used. Zero/missing enrollments are excluded. A single available term is still uncertain.
-- After everything is placed, a clean-up pass moves sections into better rooms that turned out to be free.
+- A final recovery pass tries to rearrange occupied rooms at the same time to place stranded sections.
+  It then tries provisional alternate times for sections still unassigned, subject to the same room,
+  instructor, availability, tenure-lunch and accommodation constraints. These time changes are marked
+  for review. Uncheck “Try provisional alternate times” before building to keep the requested times only.
+  Truly impossible capacity/availability cases retain actionable review explanations. This is a bounded
+  heuristic (room chains up to four moves and 5,000 room attempts per stranded section), not a proof
+  of maximum possible utilization.
 
 **Flagged as possible inaccuracies.**
 - A time that contradicts the professor's own note.
@@ -151,9 +157,10 @@ are normalized from Excel numeric noise. Catalog building history still informs 
 
 ## Manual override preview
 
-On Semester plan, use the **Scheduling assistant** chat at the top of the page. It is visible
+Use **Chatbot** in the navigation or the persistent bottom-right **Chatbot** button on any page.
+The same **Scheduling chatbot** is also at the top of Semester plan. It is visible
 even before files are uploaded. Type `Help` for upload and command guidance, or `Show review summary`
-for a summary of the built plan. This is a local command assistant, not a connected general AI chatbot.
+for a summary of the built plan, or `Which classes have no room?` for specific explanations. This is a local command assistant, not a connected general AI chatbot.
 For a manual override, enter, for example:
 
 ```

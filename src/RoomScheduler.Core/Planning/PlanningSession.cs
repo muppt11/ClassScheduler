@@ -355,6 +355,8 @@ namespace RoomScheduler
 
         public Planner.Plan Build(string fileName, string? preferencesFile = null)
         {
+            if (Rooms.Count == 0)
+                throw new InvalidDataException("The room inventory is empty. Reload the app or upload a rooms table before building a schedule.");
             var workbook = DepartmentWorkbook.FromSheets(Sheets(fileName));
             if (workbook.Sections.Count == 0)
                 throw new InvalidDataException(

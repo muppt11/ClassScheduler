@@ -16,12 +16,28 @@
     <ProjectReference Include="..\RoomScheduler.Core\RoomScheduler.Core.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- The public data files (rooms, buildings, history) are served next to the
-         app, which downloads them at startup. data/private is never included. -->
-    <Content Include="..\..\data\*.csv" Link="wwwroot\data\%(Filename)%(Extension)">
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-  </ItemGroup>
+  <!-- Register public CSVs as static assets for both local previews and publication.
+       Only these public CSVs are served; department workbooks are excluded. -->
+  <Target Name="RegisterPublicRoomData" BeforeTargets="ResolveProjectStaticWebAssets"
+          DependsOnTargets="ResolveStaticWebAssetsConfiguration">
+    <ItemGroup>
+      <_PublicRoomData Include="../../data/buildings.csv" RelativePath="data/buildings.csv" />
+      <_PublicRoomData Include="../../data/course_history.csv" RelativePath="data/course_history.csv" />
+      <_PublicRoomData Include="../../data/gdc_rooms.csv" RelativePath="data/gdc_rooms.csv" />
+      <_PublicRoomData Include="../../data/gpc_rooms_features.csv" RelativePath="data/gpc_rooms_features.csv" />
+      <_PublicRoomData Include="../../data/lecture_capture_rooms.csv" RelativePath="data/lecture_capture_rooms.csv" />
+    </ItemGroup>
+    <DefineStaticWebAssets CandidateAssets="@(_PublicRoomData)"
+        SourceType="Discovered" SourceId="$(PackageId)"
+        ContentRoot="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../data/'))"
+        BasePath="$(StaticWebAssetBasePath)">
+      <Output TaskParameter="Assets" ItemName="StaticWebAsset" />
+      <Output TaskParameter="Assets" ItemName="_PublicRoomDataAssets" />
+    </DefineStaticWebAssets>
+    <DefineStaticWebAssetEndpoints CandidateAssets="@(_PublicRoomDataAssets)"
+        ContentTypeMappings="@(StaticWebAssetContentTypeMapping)">
+      <Output TaskParameter="Endpoints" ItemName="StaticWebAssetEndpoint" />
+    </DefineStaticWebAssetEndpoints>
+  </Target>
 
 </Project>

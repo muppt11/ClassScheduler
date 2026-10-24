@@ -6,46 +6,12 @@
 <PageTitle>Semester plan</PageTitle>
 
 <h1>Semester plan</h1>
-<section class="scheduling-assistant" aria-labelledby="assistant-heading">
-    <div class="assistant-heading">
-        <h2 id="assistant-heading">Scheduling assistant</h2>
-        <span class="assistant-badge">Preview before applying</span>
-    </div>
-    <p class="hint">Ask about this schedule or request a room change. Changes are checked for conflicts and shown for your review.</p>
-    <div class="chat-history" role="log" aria-live="polite" aria-label="Scheduling assistant conversation">
-        <div class="chat-message assistant-message"><b>Assistant</b><p>Upload your Classes App and preferences below, then build a schedule.
-            I can show what needs review or help move a class. Try “Show review summary” or
-            “Put 398T in GDC 2.216 Monday through Thursday at 10:00am-11:00am”.</p></div>
-        @foreach (var message in _chatMessages)
-        {
-            <div class="chat-message @(message.User ? "user-message" : "assistant-message")"><b>@(message.User ? "You" : "Assistant")</b><p>@message.Text</p></div>
-        }
-    </div>
-    <form class="chat-composer" @onsubmit="SendChat" @onsubmit:preventDefault>
-        <label class="chat-input-label" for="assistant-request">Message the scheduling assistant</label>
-        <input id="assistant-request" @bind="_overrideText" placeholder="Ask for help or describe a room/time change…" autocomplete="off" />
-        <button type="submit" disabled="@(_busy || _needsRebuild)">Send</button>
-    </form>
-    <label class="inline"><input type="checkbox" @bind="_allowOversized" /> Allow an intentional oversized-room exception for the next request</label>
-    <p class="hint">Supported commands run in this browser. Room moves keep displaced classes at their existing times. Rebuild or reload resets manual moves.</p>
-    @if (_needsRebuild) { <p class="warn">Rebuild the schedule to use your faculty changes before requesting a move.</p> }
-    @if (_proposal != null)
-    {
-        <div class="assistant-proposal">
-            <h3>Proposed changes — not yet applied</h3>
-            <p>@_proposal.Explanation</p>
-            <div class="tablewrap"><table>
-                <thead><tr><th>Section</th><th>Before</th><th>Proposed</th></tr></thead>
-                <tbody>
-                    @foreach (var change in _proposal.ProposedChanges)
-                    { <tr><td>@change.Placement.Section.Title — @change.Placement.Section.Instructor</td><td>@change.BeforeRoom?.DisplayName @change.BeforeTime</td><td>@change.Room.DisplayName @change.Time</td></tr> }
-                </tbody>
-            </table></div>
-            <button @onclick="ApplyOverride" disabled="@_needsRebuild">Apply reviewed changes</button>
-            <button class="ghost" @onclick="CancelProposal">Cancel</button>
-        </div>
-    }
-</section>
+@if (Planning.Rooms.Count == 0)
+{
+    <div class="problems" role="alert">The room inventory could not be loaded. Reload the app or add a rooms table in step 3 before building.</div>
+}
+<SchedulingChat Disabled="@(_busy || _needsRebuild)" OnApplied="RefreshPlan" />
+
 <div class="files">
     @{
         var requests = Planning.Of(FileKind.Requests);
@@ -161,8 +127,11 @@
         @Messages(FileKind.Other)
     </div>
 
+    <p class="hint"><label class="inline"><input type="checkbox" @bind="Planning.Rules.AllowAlternateTimes" />
+        Try provisional alternate times when requested/history times cannot be placed</label>
+        Room rearrangements keep existing class times; any alternate time is marked for instructor review.</p>
     <div class="controls">
-        <button @onclick="BuildChosen" disabled="@(_busy || _chosen.Length == 0)">@(_busy ? "Working" : "Build schedule")</button>
+        <button @onclick="BuildChosen" disabled="@(_busy || _chosen.Length == 0 || Planning.Rooms.Count == 0)">@(_busy ? "Working" : "Build schedule")</button>
         <span class="summary">
             @if (_chosen.Length == 0)
             {
@@ -290,7 +259,7 @@
                             <div class="sub">@(p.Time?.Clock ?? "")</div>
                         </td>
                         <td class="mono nowrap">
-                            @(p.Room?.DisplayName ?? "")
+                            @(p.Room?.DisplayName ?? (p.Section.Online ? "Online — no room needed" : "Unassigned — see review"))
                             @if (p.Room != null) { <div class="sub">@p.Room.Capacity seats</div> }
                         </td>
                         <td class="num" title="Projected @p.Section.ProjectedSize, historical median @p.Section.PastEnrollment, minimum seats @p.Section.MinimumRoomCapacity, preferred seats @p.Section.PreferredRoomCapacity">@p.Section.SizeForRoom</td>
@@ -417,9 +386,6 @@
 
     private string _chosen = "";
     private string _preferences = "";
-    private string _overrideText = "";
-    private bool _allowOversized;
-    private Planner.OverrideProposal? _proposal;
     private string _baselineCourseValue = "";
     private string _baselineCourse
     {
@@ -435,62 +401,6 @@
     private int _minimumCapacity;
     private int _preferredCapacity;
 
-    private List<(bool User, string Text)> _chatMessages = new();
-    private void SendChat()
-    {
-        string request = _overrideText.Trim();
-        if (request.Length == 0) return;
-        _chatMessages.Add((true, request));
-        _overrideText = "";
-        _proposal = null;
-        if (!request.StartsWith("Put ", StringComparison.OrdinalIgnoreCase) &&
-            (request.Equals("help", StringComparison.OrdinalIgnoreCase) || request.Contains("how", StringComparison.OrdinalIgnoreCase)))
-        {
-            _chatMessages.Add((false, "Upload combined or separate Classes App and preference files, select them, then Build schedule. " +
-                "I understand: Show review summary; Show schedule summary; or Put [course number or exact title] in [room] [days] at [start-end]. " +
-                "Use am/pm, for example 10:00am-11:00am. For duplicate sections use title / instructor / row N from the source spreadsheet. " +
-                "For a large room such as GDC 2.216, select the oversized-room exception if needed."));
-            return;
-        }
-        if (_plan == null)
-        {
-            _chatMessages.Add((false, "Add your Classes App and preferences below, then click Build schedule. I need a built schedule to check availability and propose changes. You can also type Help."));
-            return;
-        }
-        if (!request.StartsWith("Put ", StringComparison.OrdinalIgnoreCase) &&
-            (request.Contains("summary", StringComparison.OrdinalIgnoreCase) || request.Contains("review", StringComparison.OrdinalIgnoreCase)))
-        {
-            var flags = _plan.AllFlags.Select(x => x.Flag).Concat(_plan.GeneralFlags).ToList();
-            _chatMessages.Add((false, $"{_plan.Placements.Count(p => p.Status == "Scheduled")} sections scheduled; " +
-                $"{_plan.Placements.Count(p => p.Status is "No room" or "Not scheduled")} need placing. " +
-                $"{flags.Count(f => f.Level == FlagLevel.Problem)} problems and {flags.Count(f => f.Level == FlagLevel.Review)} items to review. " +
-                "Open the Review queue below for explanations, or send a room/time change."));
-            return;
-        }
-        try
-        {
-            _proposal = Planning.ProposeOverride(request, _allowOversized);
-            _chatMessages.Add((false, _proposal.ProposedChanges.Count == 0 ? "That section is already assigned to this room and time." :
-                $"I found a proposal affecting {_proposal.ProposedChanges.Count} section(s). Review the changes below, then Apply or Cancel. Nothing has changed yet."));
-            if (_proposal.ProposedChanges.Count == 0) _proposal = null;
-        }
-        catch (Exception ex) { _chatMessages.Add((false, ex.Message)); }
-    }
-    private void ApplyOverride()
-    {
-        try
-        {
-            Planning.ApplyOverride(_proposal!);
-            _proposal = null;
-            _chatMessages.Add((false, "Applied the reviewed changes. Room and instructor conflicts were checked. The schedule and workbook download now include these assignments."));
-        }
-        catch (Exception ex) { _chatMessages.Add((false, ex.Message)); _proposal = null; }
-    }
-    private void CancelProposal()
-    {
-        _proposal = null;
-        _chatMessages.Add((false, "Proposal canceled. Your schedule has not changed."));
-    }
     private async Task SaveBaseline()
     {
         try
@@ -522,6 +432,8 @@
             : requests.FirstOrDefault()?.Name ?? "";
     }
 
+    private void RefreshPlan() { _plan = Planning.LatestPlan; }
+
     private Task BuildChosen() => Run(() => Planning.Build(_chosen, _preferences));
 
     /// <summary>Runs the same workbook again, picking up profile changes such as difficult faculty.</summary>
@@ -538,7 +450,6 @@
             p.Section.Track = s.Profile.Track;
         Planning.Faculty.Save();
         _needsRebuild = true;
-        _proposal = null;
     }
 
     /// <summary>
@@ -633,8 +544,7 @@
         try
         {
             _plan = build();
-            _proposal = null;
-                _baselineCourse = _plan.Placements.FirstOrDefault()?.Section.Course ?? "";
+                    _baselineCourse = _plan.Placements.FirstOrDefault()?.Section.Course ?? "";
             _needsRebuild = false;
         }
         catch (Exception ex)
@@ -682,7 +592,6 @@
             p.Section.Difficult = s.Profile.Difficult;
         Planning.Faculty.Save();
         _needsRebuild = true;
-        _proposal = null;
     }
 
     private async Task DownloadAll() =>

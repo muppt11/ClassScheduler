@@ -30,6 +30,8 @@ namespace RoomScheduler
             course.Length >= 3 && char.IsDigit(course[0]) && (course[1] == '8' || course[1] == '9');
 
         /// <summary>The enrollment cap given to the registrar is room capacity minus this share.</summary>
+        public bool AllowAlternateTimes { get; set; } = true;
+
         public int UnknownEnrollmentSize { get; set; } = 25;
 
         public double RegistrarHeadroom { get; set; } = 0.10;

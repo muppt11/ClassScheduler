@@ -35,7 +35,7 @@ public class RealFilesTests
             Assert.Equal(FileKind.Unknown, s.Save("gates_template.xlsx", gates, FileKind.Requests).Kind);
 
         var plan = s.Build("fall26_requests.xlsx");
-        Assert.True(plan.Placements.Count(p => p.Room != null) >= 100);
+        Assert.All(plan.Placements.Where(p => !p.Section.Online), p => Assert.NotNull(p.Room));
         Assert.DoesNotContain(plan.Placements, p => p.Room?.Building == "CPE");
 
         // No room or instructor is double booked.
@@ -61,4 +61,23 @@ public class RealFilesTests
         Assert.Equal(FileKind.LectureCapture, info.Kind);
         Assert.True(s.LectureCaptureRooms > 100);
     }
+    [Fact]
+    public void Older_sample_with_repeated_instructor_times_places_every_in_person_section()
+    {
+        var requests = Read("fall25_requests.xlsx"); var past = Read("fall25_actual.xlsx");
+        if (requests == null || past == null) return;
+        var session = new PlanningSession(); session.Initialize(new MemoryStore(), DataFiles.FromDataFolder());
+        session.Save("requests.xlsx", requests, FileKind.Requests);
+        session.Save("history.xlsx", past, FileKind.PastSchedule);
+        var plan = session.Build("requests.xlsx");
+        Assert.All(plan.Placements.Where(p => !p.Section.Online), p => Assert.NotNull(p.Room));
+        var placed = plan.Placements.Where(p => p.Time != null).ToList();
+        foreach (var p in placed)
+            foreach (var other in placed.Where(o => o != p && o.Time!.Overlaps(p.Time!)))
+            {
+                Assert.False(p.Room != null && p.Room == other.Room);
+                Assert.False(!p.Section.InstructorMissing && p.Section.Surname == other.Section.Surname);
+            }
+    }
+
 }

@@ -241,4 +241,70 @@ public class SchedulingTests
         Assert.Equal("2.216", exported.Cell(1, 6));
     }
 
+    [Fact]
+    public void Repeated_preferences_for_one_instructor_use_feasible_alternatives_instead_of_blanks()
+    {
+        var wb = Requests();
+        for (int row = 2; row <= 8; row++)
+        {
+            wb.Sections.Add(new SectionRequest {SourceRow = row, Title = $"31{row} COURSE", Instructor = "SMITH A", ProjectedSize = 30});
+            wb.Forms.Add(new PreferenceForm {Professor = "SMITH A", Course = $"31{row} COURSE", Time1 = "MWF 10:00-11:00"});
+        }
+        var planner = Planner(new List<Room> {Rooms()[1]});
+        var plan = planner.Build(wb);
+        Assert.All(plan.Placements, p => Assert.NotNull(p.Room));
+        AssertNoConflicts(plan);
+        Assert.Contains(plan.AllFlags, x => x.Flag.Message.Contains("provisional alternative"));
+        Assert.DoesNotContain(plan.AllFlags, x => x.Flag.Level == FlagLevel.Problem && x.Flag.Category == ReviewFlag.Time);
+    }
+
+    [Fact]
+    public void Room_recovery_moves_smaller_class_so_a_large_class_can_keep_its_requested_time()
+    {
+        var wb = Requests(track: "t");
+        wb.Forms[0] = new PreferenceForm {Professor = "SMITH A", Course = "314 DATA STRUCTURES", Time1 = "MWF 10:00-11:00", RoomRequest = "GDC 2.216"};
+        wb.Sections.Add(new SectionRequest {SourceRow = 2, Title = "315 LARGE", Instructor = "JONES B", Track = FacultyTrack.Professional, ProjectedSize = 150});
+        wb.Forms.Add(new PreferenceForm {Professor = "JONES B", Course = "315 LARGE", Time1 = "MWF 10:00-11:00"});
+        var plan = Planner(Rooms().Take(2).ToList()).Build(wb);
+        Assert.All(plan.Placements, p => Assert.NotNull(p.Room));
+        Assert.Equal("GDC 2.216", plan.Placements[1].Room!.DisplayName);
+        Assert.Equal(plan.Placements[0].Time, plan.Placements[1].Time);
+        AssertNoConflicts(plan);
+    }
+
+    [Fact]
+    public void Alternate_times_respect_profile_availability_and_tenure_lunch()
+    {
+        var wb = Requests(track: "t");
+        var faculty = FacultyStore.InMemory();
+        faculty.GetOrAdd("SMITH", "SMITH A").Unavailable = "TTH 8:00-6:00pm";
+        wb.Forms[0] = new PreferenceForm {Professor = "SMITH A", Course = "314 DATA STRUCTURES", Time1 = "MWF 12:00-1:00"};
+        var plan = Planner(faculty: faculty).Build(wb);
+        var p = Assert.Single(plan.Placements);
+        Assert.NotNull(p.Room);
+        Assert.False(p.Time!.Overlaps(plan.Rules.TenureLunch));
+        Assert.DoesNotContain(faculty.Find("SMITH")!.UnavailableTimes(), t => t.Overlaps(p.Time));
+        Assert.Contains(p.Section.Flags, f => f.Message.Contains("provisional alternative"));
+    }
+
+    [Fact]
+    public void Truly_impossible_capacity_stays_unassigned_with_an_actionable_explanation()
+    {
+        var p = Assert.Single(Planner().Build(Requests("1000")).Placements);
+        Assert.Null(p.Room);
+        Assert.Contains(p.Section.Flags, f => f.Level == FlagLevel.Problem && f.Message.Contains("No eligible room"));
+    }
+
+    [Fact]
+    public void Alternate_times_can_be_disabled_without_breaking_hard_constraints()
+    {
+        var wb = Requests();
+        wb.Sections.Add(new SectionRequest {SourceRow = 2, Title = "315 OTHER", Instructor = "SMITH A", ProjectedSize = 30});
+        wb.Forms.Add(new PreferenceForm {Professor = "SMITH A", Course = "315 OTHER", Time1 = "MWF 10:00-11:00"});
+        var planner = Planner(); planner.Rules.AllowAlternateTimes = false;
+        var plan = planner.Build(wb);
+        Assert.Single(plan.Placements, p => p.Room == null);
+        AssertNoConflicts(plan);
+    }
+
 }

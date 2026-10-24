@@ -123,6 +123,7 @@ namespace RoomScheduler
                 Place(p, plan.Placements);
 
             Improve(order, plan.Placements);
+            RecoverUnplaced(plan);
             if (Rules.ScheduleDiscussions)
                 PlaceDiscussions(plan);
 
@@ -300,18 +301,7 @@ namespace RoomScheduler
 
             if (options.Count == 0)
             {
-                // Provisional standard slots, subject to the same hard constraints as requests.
-                int credits = s.Course.Length > 0 && char.IsDigit(s.Course[0]) ? s.Course[0] - '0' : 3;
-                if (credits < 1) credits = 3;
-                foreach (string days in new[] { "MWF", "TTH" })
-                    for (int hour = 8; hour <= 17; hour++)
-                    {
-                        var start = TimeSpan.FromHours(hour);
-                        var time = new MeetingTime(MeetingTime.ParseDays(days), start,
-                            start + TimeSpan.FromHours((double)credits / MeetingTime.ParseDays(days).Count));
-                        if (!s.Wishes.Blocked.Any(b => b.Time.Overlaps(time)))
-                            options.Add(new TimeOption(time, 1, "provisional standard slot; confirm with instructor"));
-                    }
+                options.AddRange(ProvisionalOptions(s));
                 s.Flag(FlagLevel.Review, ReviewFlag.Time, "No usable time history or preference; assigned a provisional feasible slot for review.");
             }
 
@@ -419,6 +409,102 @@ namespace RoomScheduler
                     s.Flag(FlagLevel.Review, ReviewFlag.Contradiction,
                         $"Mentions discussion room {room.DisplayName} from before, but the record shows " +
                         $"{string.Join(", ", s.PastSections.Select(p => $"{p.DiscussionBuilding} {p.DiscussionRoom}".Trim()).Where(x => x.Length > 0).DefaultIfEmpty("none"))}.");
+            }
+        }
+
+        private List<TimeOption> ProvisionalOptions(SectionRequest s)
+        {
+            int credits = s.Course.Length > 0 && char.IsDigit(s.Course[0]) ? s.Course[0] - '0' : 3;
+            if (credits < 1) credits = 3;
+            // Include standard half-hour starts so a crowded whole hour needn't strand a class.
+            var result = new List<TimeOption>();
+            foreach (string days in new[] { "MWF", "TTH" })
+                for (int halfHour = 16; halfHour <= 36; halfHour++)
+                {
+                    var start = TimeSpan.FromMinutes(halfHour * 30);
+                    var dayList = MeetingTime.ParseDays(days);
+                    var time = new MeetingTime(dayList, start, start + TimeSpan.FromHours((double)credits / dayList.Count));
+                    if (time.End <= TimeSpan.FromHours(21) && TimeAllowed(s, time))
+                        result.Add(new TimeOption(time, 1, "provisional alternative; confirm with instructor"));
+                }
+            return result;
+        }
+
+        /// <summary>Try room rearrangement at submitted times, then provisional times for unplaced sections.</summary>
+        private void RecoverUnplaced(Plan plan)
+        {
+            foreach (var p in plan.Placements.Where(p => !p.Section.Online && p.Room == null)
+                .OrderBy(p => p.Section.PriorityTier).ThenByDescending(p => p.Section.SizeForRoom).ToList())
+            {
+                int attempts = 0;
+                bool Rehouse(Placement moving, MeetingTime time, HashSet<Placement> chain, int depth)
+                {
+                    if (depth > 4 || attempts > 5000 || chain.Contains(moving) ||
+                        !TimeAllowed(moving.Section, time) || InstructorBusy(moving, time, plan.Placements)) return false;
+                    var nextChain = new HashSet<Placement>(chain) { moving };
+                    foreach (var room in _rooms.Where(r => RoomAllowed(moving.Section, r))
+                        .OrderBy(r => Math.Abs(r.Capacity - Math.Max(moving.Section.SizeForRoom, moving.Section.PreferredRoomCapacity))))
+                    {
+                        if (++attempts > 5000) return false;
+                        var blockers = plan.Placements.Where(o => o != moving && o.Room == room && o.Time != null && o.Time.Overlaps(time)).ToList();
+                        if (blockers.Any(nextChain.Contains)) continue;
+                        var snapshot = plan.Placements.Select(o => (Placement: o, o.Room, o.Time)).ToList();
+                        moving.Room = room; moving.Time = time;
+                        foreach (var blocker in blockers) blocker.Room = null;
+                        bool valid = blockers.All(o => Rehouse(o, o.Time!, nextChain, depth + 1));
+                        if (valid && plan.Placements.Where(o => o.Room != null && o.Time != null)
+                            .All(o => ScoreRoom(o, o.Time!, o.Room!, plan.Placements, new()) != null)) return true;
+                        foreach (var old in snapshot) { old.Placement.Room = old.Room; old.Placement.Time = old.Time; }
+                    }
+                    return false;
+                }
+
+                var before = plan.Placements.ToDictionary(o => o, o => o.Room);
+                TimeOption? chosen = null;
+                foreach (var option in Options(p.Section))
+                {
+                    if (Rehouse(p, option.Time, new(), 0)) { chosen = option; break; }
+                }
+                bool alternate = false;
+                if (chosen == null && Rules.AllowAlternateTimes)
+                {
+                    var original = Options(p.Section);
+                    var alternatives = ProvisionalOptions(p.Section)
+                        .Where(o => !original.Any(x => x.Time.Equals(o.Time))).ToList();
+                    _options[p.Section] = alternatives;
+                    var best = BestChoice(p, plan.Placements, out _);
+                    _options[p.Section] = original;
+                    if (best != null)
+                    {
+                        p.Room = best.Value.Room;
+                        p.Time = best.Value.Option.Time;
+                        chosen = best.Value.Option;
+                        alternate = true;
+                    }
+                }
+                if (chosen != null)
+                {
+                    p.Option = chosen;
+                    p.Why.Clear(); p.Why.Add(TimeReason(chosen));
+                    p.Section.Flags.RemoveAll(f => f.Level == FlagLevel.Problem &&
+                        (f.Category == ReviewFlag.Room || f.Category == ReviewFlag.Time));
+                    if (alternate)
+                        p.Section.Flag(FlagLevel.Review, ReviewFlag.Time,
+                            $"Requested/history times could not be placed. Assigned provisional alternative {p.Time} in {p.Room!.DisplayName}; confirm the time with the instructor.");
+                    foreach (var moved in plan.Placements.Where(o => o != p && o.Room != before[o]))
+                    {
+                        moved.Why.Clear();
+                        moved.Why.Add("room reassigned at the same time to fit another section without conflicts");
+                        moved.Section.Flag(FlagLevel.Review, ReviewFlag.Room,
+                            $"Moved from {before[moved]?.DisplayName} to {moved.Room!.DisplayName} to place {p.Section.Course}; time unchanged.");
+                    }
+                }
+                else if (!_rooms.Any(r => RoomAllowed(p.Section, r)))
+                    p.Section.Flag(FlagLevel.Problem, ReviewFlag.Room,
+                        $"No eligible room in the inventory meets capacity {Math.Max(p.Section.SizeForRoom, p.Section.MinimumRoomCapacity)}, offline-room and accommodation constraints. Add an eligible room or revise the inputs.");
+                else
+                    p.Section.Flag(FlagLevel.Problem, ReviewFlag.Room,
+                        "No feasible room/time found after room rearrangement and allowed time alternatives; check instructor availability and room inventory.");
             }
         }
 
