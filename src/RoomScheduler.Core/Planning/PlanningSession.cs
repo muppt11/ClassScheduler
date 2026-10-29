@@ -66,12 +66,12 @@ namespace RoomScheduler
     /// offline rooms. All of it is saved in an <see cref="IKeyValueStore"/>, so it
     /// is still there next time. The website runs one of these in the browser.
     /// </summary>
-    public class PlanningSession
+    public partial class PlanningSession
     {
         public SchedulingConversation Conversation { get; } = new();
         public SchedulingRules Rules { get; } = new();
         public List<Room> Rooms { get; private set; } = new();
-        public string RoomsSource { get; private set; } = "the built-in rooms table";
+        public string RoomsSource => AddedRoomCount == 0 ? _roomsTableSource : $"{_roomsTableSource} and {AddedRoomCount} added room(s)";
         public string LectureCaptureSource { get; private set; } = "the built-in Lectures Online list";
         public Campus Campus { get; private set; } = new();
         public FacultyStore Faculty { get; private set; } = FacultyStore.InMemory();
@@ -88,6 +88,7 @@ namespace RoomScheduler
         public Planner.Plan? LatestPlan { get; private set; }
         public string LatestSource { get; private set; } = "";
         private bool _inputsChanged;
+        private long _inputsRevision;
         private string? _builtRules;
         public bool RequiresRebuild => LatestPlan != null && (_inputsChanged || _builtRules != JsonSerializer.Serialize(Rules));
 
@@ -113,6 +114,7 @@ namespace RoomScheduler
 
             LoadRooms();
             ReloadHistory();
+            LoadBuildingPriorities();
         }
 
         // ------------------------------------------------------------ stored files
@@ -188,15 +190,14 @@ namespace RoomScheduler
 
         private void MarkInputsChanged()
         {
+            _inputsRevision++;
             if (LatestPlan == null) return;
             _inputsChanged = true;
             Conversation.Sync(null);
         }
 
         private bool AffectsPlan(FileKind kind, string name) =>
-            kind is FileKind.Rooms or FileKind.LectureCapture or FileKind.PastSchedule or FileKind.Reference ||
-            kind == FileKind.Requests && name.Equals(LatestSource, StringComparison.OrdinalIgnoreCase) ||
-            kind == FileKind.Preferences && name.Equals(LatestPreferences, StringComparison.OrdinalIgnoreCase);
+            kind is FileKind.Rooms or FileKind.LectureCapture or FileKind.PastSchedule or FileKind.Reference or FileKind.Requests or FileKind.Preferences;
 
         /// <summary>
         /// What a file is, from its contents, not its name or where it was added.
@@ -289,6 +290,8 @@ namespace RoomScheduler
         {
             string name = Path.GetFileName(fileName);
             var saved = DateTime.Now;
+            var previous = Index().Select(f => f.Saved).DefaultIfEmpty(DateTime.MinValue).Max();
+            if (saved <= previous) saved = previous.AddTicks(1);
 
             if (bytes.Length > MaxFileBytes)
                 return new LibraryFile(name, FileKind.Unknown,
@@ -380,27 +383,32 @@ namespace RoomScheduler
             if (fromFile is { Count: > 0 })
             {
                 Rooms = fromFile;
-                RoomsSource = newestRooms!.Name;
+                _roomsTableSource = newestRooms!.Name;
             }
             else
             {
                 Rooms = Room.FromCsvText(_data.RoomsCsv, _data.GdcRoomsCsv, Rules);
-                RoomsSource = "the built-in rooms table";
+                _roomsTableSource = "the built-in rooms table";
             }
 
             var newestList = Of(FileKind.LectureCapture).FirstOrDefault();
+            HashSet<string> names;
             if (newestList != null)
             {
-                var names = LectureCaptureNames(Sheets(newestList.Name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                names = LectureCaptureNames(Sheets(newestList.Name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 foreach (var r in Rooms) r.LectureCapture = names.Contains(r.DisplayName);
                 LectureCaptureRooms = Rooms.Count(r => r.LectureCapture);
                 LectureCaptureSource = newestList.Name;
             }
             else
             {
-                LectureCaptureRooms = Room.MarkLectureCaptureText(Rooms, _data.LectureCaptureCsv);
+                Room.MarkLectureCaptureText(Rooms, _data.LectureCaptureCsv);
+                names = Csv.Lines(_data.LectureCaptureCsv).Skip(1).Select(Csv.ParseLine).Where(r => r.Count >= 2)
+                    .Select(r => $"{r[0].Trim()} {r[1].Trim()}").ToHashSet(StringComparer.OrdinalIgnoreCase);
                 LectureCaptureSource = "the built-in Lectures Online list";
             }
+            LoadAddedRooms(names);
+            LectureCaptureRooms = Rooms.Count(r => r.LectureCapture);
         }
 
         // ------------------------------------------------------------ planning
@@ -422,11 +430,27 @@ namespace RoomScheduler
                 workbook.Forms.Clear();
                 workbook.Forms.AddRange(preferences);
             }
-            foreach (var f in Of(FileKind.Reference).OrderBy(f => f.Saved))
-                ReferenceSheets.Apply(Sheets(f.Name), workbook, Faculty);
-            ReferenceSheets.Apply(Sheets(fileName), workbook, Faculty);
-            if (!string.IsNullOrEmpty(preferencesFile) && !preferencesFile.Equals(fileName, StringComparison.OrdinalIgnoreCase))
-                ReferenceSheets.Apply(Sheets(preferencesFile), workbook, Faculty);
+            // Stage profile imports so invalid updates or failed storage writes cannot
+            // partially replace the profiles used by the previous schedule.
+            var buildFaculty = new FacultyStore(Faculty.Snapshot(), json => SaveSetting("faculty", json));
+            foreach (var profile in buildFaculty.All) profile.PrepareForImport();
+            var referenceFiles = Files().Where(f => f.Kind == FileKind.Reference ||
+                f.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase) ||
+                f.Name.Equals(preferencesFile, StringComparison.OrdinalIgnoreCase)).OrderBy(f => f.Saved);
+            foreach (var file in referenceFiles)
+            {
+                if (file.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+                    foreach (var section in workbook.Sections.Where(s => !s.InstructorMissing && !buildFaculty.IsRemoved(s.Surname)))
+                    {
+                        var profile = buildFaculty.GetOrAdd(section.Surname, section.Instructor);
+                        if (!profile.TrackExplicitlySet && section.Track != FacultyTrack.Unknown &&
+                            (profile.ImportedTrack.HasValue || profile.Track == FacultyTrack.Unknown))
+                        { profile.Track = section.Track; profile.ImportedTrack = section.Track; }
+                        if (!profile.DifficultExplicitlySet)
+                        { profile.Difficult = section.Difficult; profile.ImportedDifficult = section.Difficult; }
+                    }
+                ReferenceSheets.Apply(Sheets(file.Name), workbook, buildFaculty);
+            }
             foreach (var section in workbook.Sections)
             {
                 var value = _store.Get(BaselineKey(workbook.Semester, section.Course));
@@ -435,9 +459,13 @@ namespace RoomScheduler
                 section.MinimumRoomCapacity = baseline[0];
                 section.PreferredRoomCapacity = baseline[1];
             }
-            var planner = new Planner(Rooms, Campus, Past, Faculty, Rules, DepartmentHistory);
+            var planner = new Planner(Rooms, Campus, Past, buildFaculty, Rules, DepartmentHistory);
             var plan = planner.Build(workbook);
-            Faculty.Save();
+            buildFaculty.Save();
+            Faculty = buildFaculty;
+            _pendingFileConfirmation = null;
+            _pendingBuildingPriority = null;
+            _pendingCourseBaseline = null;
             _planner = planner;
             LatestPlan = plan;
             LatestPreferences = preferencesFile;

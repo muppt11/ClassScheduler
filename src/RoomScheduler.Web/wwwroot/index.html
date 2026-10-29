@@ -43,11 +43,16 @@
             };
         })();
         window.scrollChatToBottom = element => { element.scrollTop = element.scrollHeight; };
-        // Saves bytes from the app as a file, used for spreadsheet exports.
+        // Give every export and uploaded-file download a timestamp and unique suffix.
         window.saveFile = (name, base64, type) => {
             const link = document.createElement("a");
             link.href = "data:" + (type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") + ";base64," + base64;
-            link.download = name;
+            const extensionAt = name.lastIndexOf(".");
+            const hasExtension = extensionAt > 0;
+            const stem = hasExtension ? name.slice(0, extensionAt) : name;
+            const extension = hasExtension ? name.slice(extensionAt) : "";
+            const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+            link.download = `${stem} ${timestamp}-${crypto.randomUUID().slice(0, 8)}${extension}`;
             link.click();
         };
     </script>

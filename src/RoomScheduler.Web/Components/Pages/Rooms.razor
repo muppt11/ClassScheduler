@@ -10,15 +10,46 @@
     <b>@Planning.Rooms.Count(Offline)</b> offline.
 </p>
 
+<details open>
+    <summary>Add a room</summary>
+    <p class="hint">Added rooms stay saved in this browser, including when you upload a new rooms table. Rebuild the schedule to use them.</p>
+    <form @onsubmit="AddRoom" @onsubmit:preventDefault>
+        <div class="form">
+            <label for="new-room-building">Building code</label>
+            <input id="new-room-building" list="room-building-codes" placeholder="e.g. GDC" required maxlength="5" @bind="_newBuilding" />
+            <datalist id="room-building-codes">
+                @foreach (var building in Planning.Rooms.Select(r => r.Building).Concat(Planning.Campus.Buildings).Distinct().OrderBy(b => b))
+                { <option value="@building"></option> }
+            </datalist>
+            <label for="new-room-number">Room number</label>
+            <input id="new-room-number" placeholder="e.g. 2.216 or 116" required @bind="_newNumber" />
+            <label for="new-room-capacity">Capacity (seats)</label>
+            <input id="new-room-capacity" type="number" min="1" max="2147483647" step="1" required @bind="_newCapacity" />
+            <label for="new-room-features">Features</label>
+            <input id="new-room-features" placeholder="e.g. CON Wb CWS" @bind="_newFeatures" />
+            <label>Options</label>
+            <div>
+                <label class="inline"><input type="checkbox" @bind="_newCapture" /> Lectures Online / lecture capture</label>
+                <label class="inline"><input type="checkbox" @bind="_newDepartmentOnly" /> CS-only departmental room</label>
+            </div>
+            <label for="new-room-notes">Notes</label>
+            <textarea id="new-room-notes" rows="2" @bind="_newNotes"></textarea>
+        </div>
+        <div class="controls"><button type="submit">Add room</button></div>
+    </form>
+    @if (_addError != null) { <p class="problems" role="alert">@_addError</p> }
+    @if (_addedMessage != null) { <p class="summary" role="status">@_addedMessage</p> }
+</details>
+
 <h2>Offline</h2>
 <p class="explain">
     Check a building to take every room in it offline, or open it to pick single rooms.
     The scheduler never puts a class in an offline room.
 </p>
 
-@if (_changed)
+@if (_changed || Planning.RequiresRebuild)
 {
-    <div class="problems">Offline rooms changed. Rebuild the schedule on the Semester plan page to apply.</div>
+    <div class="problems">Room or planning settings changed. Rebuild the schedule on the Semester plan page to apply.</div>
 }
 
 <div class="offline">
@@ -98,6 +129,33 @@
 </p>
 
 @code {
+    private string _newBuilding = "";
+    private string _newNumber = "";
+    private int? _newCapacity;
+    private string _newFeatures = "";
+    private string _newNotes = "";
+    private bool _newCapture;
+    private bool _newDepartmentOnly;
+    private string? _addError;
+    private string? _addedMessage;
+
+    private void AddRoom()
+    {
+        _addError = null; _addedMessage = null;
+        try
+        {
+            var room = Planning.AddRoom(_newBuilding, _newNumber, _newCapacity ?? 0, _newFeatures,
+                _newCapture, _newDepartmentOnly, _newNotes);
+            _filter = room.DisplayName; _onlyUsed = false; _open.Add(room.Building);
+            _addedMessage = $"Saved {room.DisplayName} ({room.Capacity} seats). " +
+                (Offline(room) ? "This room is offline; enable it in the Offline list before scheduling. " : "") +
+                (Planning.LatestPlan != null ? "Rebuild on Semester plan to use it." : "It is available for your next schedule.");
+            _newBuilding = room.Building; _newNumber = ""; _newCapacity = null;
+            _newFeatures = _newNotes = ""; _newCapture = _newDepartmentOnly = false;
+        }
+        catch (Exception ex) { _addError = ex.Message; }
+    }
+
     private string _filter = "";
     private bool _onlyUsed;
     private bool _changed;

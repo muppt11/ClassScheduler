@@ -8,7 +8,7 @@ namespace RoomScheduler.Tests;
 /// browser's local storage. Spreadsheets are built here so the tests need
 /// none of the department's private files.
 /// </summary>
-public class FileUploadTests
+public partial class FileUploadTests
 {
     private static PlanningSession NewSession(IKeyValueStore? store = null)
     {
@@ -416,6 +416,83 @@ public class FileUploadTests
         var s=NewSession(); s.Save("classes.xlsx",Requests(),FileKind.Requests); var plan=s.Build("classes.xlsx");
         var assigned=plan.Placements[0]; var replacement=new Room {Building=assigned.Room!.Building,RoomNumber=assigned.Room.RoomNumber,Capacity=assigned.Room.Capacity};
         Assert.Contains(assigned,plan.InRoom(replacement));
+    }
+
+    [Theory]
+    [InlineData("T")]
+    [InlineData("PTF")]
+    public void Clearing_a_track_stays_cleared_after_save_reopen_and_reference_import(string importedTrack)
+    {
+        var store = new MemoryStore(); var session = NewSession(store);
+        var classes = Workbook(("Classes App", new[] {
+            new[] { "Title", "Professor", "Tenure or PTF", "Minimum Room Size Needed" },
+            new[] { "314 DATA STRUCTURES", "SMITH A", importedTrack, "30" }
+        }));
+        session.Save("classes.xlsx", classes, FileKind.Requests); session.Build("classes.xlsx");
+        var profile = session.Faculty.Find("SMITH")!;
+        Assert.NotEqual(FacultyTrack.Unknown, profile.Track);
+        profile.SetTrack(FacultyTrack.Unknown); session.Faculty.Save();
+        var reopened = NewSession(store);
+        Assert.Equal(FacultyTrack.Unknown, reopened.Faculty.Find("SMITH")!.Track);
+        reopened.Save("reference.xlsx", Workbook(("Faculty Reference", new[] {
+            new[] { "Professor", "Tenure or PTF" }, new[] { "SMITH A", importedTrack }
+        })), FileKind.Other);
+        var rebuilt = reopened.Build("classes.xlsx");
+        var section = Assert.Single(rebuilt.Placements).Section;
+        Assert.Equal(FacultyTrack.Unknown, section.Track);
+        Assert.True(reopened.Faculty.Find("SMITH")!.TrackExplicitlySet);
+        Assert.Contains(rebuilt.GeneralFlags, f => f.Message.Contains("unknown faculty track"));
+        Assert.Single(rebuilt.Placements); // Clearing a designation never deletes the professor's course.
+    }
+
+    [Fact]
+    public void Removing_D_overrides_the_workbook_priority_after_reopening()
+    {
+        var store = new MemoryStore(); var session = NewSession(store);
+        session.Save("classes.xlsx", Workbook(("Classes App", new[] {
+            new[] { "Title", "Professor", "Tenure or PTF", "Prioritized Professor", "Minimum Room Size Needed" },
+            new[] { "314 DATA STRUCTURES", "SMITH A", "PTF", "D", "30" }
+        })), FileKind.Requests);
+        var initial = Assert.Single(session.Build("classes.xlsx").Placements);
+        Assert.True(initial.Section.Difficult);
+        var profile = session.Faculty.Find("SMITH")!;
+        Assert.True(profile.Difficult); // The tracker reflects the imported designation.
+        profile.SetDifficult(false); session.Faculty.Save();
+        var reopened = NewSession(store);
+        var rebuilt = Assert.Single(reopened.Build("classes.xlsx").Placements);
+        Assert.False(rebuilt.Section.Difficult);
+        Assert.Equal(FacultyTrack.Professional, rebuilt.Section.Track); // D removal does not remove P.
+        Assert.True(reopened.Faculty.Find("SMITH")!.DifficultExplicitlySet);
+    }
+
+    [Fact]
+    public void Clearing_P_keeps_D_and_can_be_changed_to_T_later()
+    {
+        var store = new MemoryStore(); var session = NewSession(store);
+        session.Save("classes.xlsx", Requests(), FileKind.Requests); session.Build("classes.xlsx");
+        var profile = session.Faculty.Find("SMITH")!;
+        profile.SetDifficult(true); profile.SetTrack(FacultyTrack.Unknown); session.Faculty.Save();
+        var reopened = NewSession(store);
+        var section = reopened.Build("classes.xlsx").Placements.Single(p => p.Section.Surname == "SMITH").Section;
+        Assert.True(section.Difficult); Assert.Equal(FacultyTrack.Unknown, section.Track);
+        reopened.Faculty.Find("SMITH")!.SetTrack(FacultyTrack.Tenure); reopened.Faculty.Save();
+        var again = NewSession(store).Build("classes.xlsx").Placements.Single(p => p.Section.Surname == "SMITH").Section;
+        Assert.Equal(FacultyTrack.Tenure, again.Track); Assert.True(again.Difficult);
+    }
+
+    [Fact]
+    public void Older_profiles_without_explicit_edit_flags_still_accept_imported_tracks()
+    {
+        string? saved = null;
+        var faculty = new FacultyStore("[{\"Surname\":\"SMITH\",\"DisplayName\":\"SMITH A\",\"Track\":0,\"Difficult\":false}]", json => saved = json);
+        var workbook = DepartmentWorkbook.FromSheets(new() {
+            new Xlsx.Sheet { Name = "Classes App", Rows = { new() { "Title", "Professor", "Tenure or PTF", "Minimum Room Size Needed" },
+                new() { "314 DATA STRUCTURES", "SMITH A", "PTF", "30" } } }
+        });
+        var planner = new Planner(new() { new Room { Building = "GDC", RoomNumber = "1.100", Capacity = 40 } },
+            new Campus(), RoomScheduler.PastSchedule.Empty, faculty);
+        Assert.Equal(FacultyTrack.Professional, Assert.Single(planner.Build(workbook).Placements).Section.Track);
+        faculty.Save(); Assert.NotNull(saved);
     }
 
 }

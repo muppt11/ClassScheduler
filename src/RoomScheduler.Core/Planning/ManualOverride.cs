@@ -156,6 +156,7 @@ public partial class Planner
             assigned = Rehouse(displaced.Select(p => copies[p]).ToList(), new HashSet<Placement> { moved }, 0);
         }
         if (!assigned) throw new ArgumentException("Cannot rehouse displaced classes at their existing times within the bounded room-chain search. Nothing changed; choose another room/time or a room-and-time swap.");
+        ValidateAssignmentsPreserved(copies);
         ValidateOverride(copies.Values.ToList());
         var changes = all.Where(p => p.Room != copies[p].Room || !Equals(p.Time, copies[p].Time))
             .Select(p => new OverrideChange(p, p.Room, p.Time, copies[p].Room!, copies[p].Time!)).ToList();
@@ -163,7 +164,8 @@ public partial class Planner
         {
             Source = plan, Snapshot = all.Select(p => (p, p.Room, p.Time)).ToList(), Changes = changes,
             Explanation = $"Manual request: {request}. " + (allowOversizedRoom ? "Oversized-room exception explicitly allowed. " : "") +
-                "Displaced sections retain their times. Review weekly hours and registrar approval before publishing. Rebuild replaces manual overrides."
+                (displaced.Count > 0 ? $"All {displaced.Count} directly displaced section(s) have checked replacement rooms and retain their times. All affected room assignments apply together. " : "Displaced sections retain their times. ") +
+                "Review weekly hours and registrar approval before publishing. Rebuild replaces manual overrides."
         };
     }
 
@@ -191,6 +193,7 @@ public partial class Planner
             if (Rules.FitIndicator(next.Room!.Capacity, next.Section.SizeForRoom) == "Max high" && !allowOversizedRoom)
                 throw new ArgumentException($"The swap would put {next.Section.Title} in a room much larger than needed. Allow an intentional oversized-room exception to preview it.");
         }
+        ValidateAssignmentsPreserved(copies);
         ValidateOverride(copies.Values.ToList());
         var changes = new[] {first, second}.Where(p => p.Room != copies[p].Room || !Equals(p.Time, copies[p].Time))
             .Select(p => new OverrideChange(p, p.Room, p.Time, copies[p].Room!, copies[p].Time!)).ToList();
@@ -200,6 +203,7 @@ public partial class Planner
             Explanation = $"Swap {first.Section.Title} with {second.Section.Title}: " +
                 (swapTimes ? "exchange both rooms and meeting times. Check weekly contact hours for both sections. " : "exchange rooms; both sections keep their meeting times. ") +
                 (allowOversizedRoom ? "Oversized-room exception explicitly allowed. " : "") +
+                "Both sections receive checked room assignments, and both changes apply together. " +
                 "All proposed assignments were checked for capacity, room/instructor conflicts, offline rooms, policies and accommodations. Rebuild replaces manual overrides."
         };
     }
@@ -209,12 +213,14 @@ public partial class Planner
         if (proposal.Applied || proposal.Source != plan || proposal.Snapshot.Count != plan.Placements.Count + plan.Discussions.Count ||
             proposal.Snapshot.Any(s => s.Placement.Room != s.Room || !Equals(s.Placement.Time, s.Time)))
             throw new InvalidOperationException("Plan changed since preview; generate a fresh proposal.");
-        var copies = proposal.Snapshot.Select(s =>
+        var copies = proposal.Snapshot.ToDictionary(s => s.Placement, s =>
         {
             var change = proposal.Changes.FirstOrDefault(c => c.Placement == s.Placement);
-            return new Placement { Section = s.Placement.Section, Room = change?.Room ?? s.Room, Time = change?.Time ?? s.Time };
-        }).ToList();
-        ValidateOverride(copies);
+            return new Placement { Section = s.Placement.Section, Room = change == null ? s.Room : change.Room,
+                Time = change == null ? s.Time : change.Time, LectureOf = s.Placement.LectureOf };
+        });
+        ValidateAssignmentsPreserved(copies);
+        ValidateOverride(copies.Values.ToList());
         foreach (var change in proposal.Changes)
         {
             var p = change.Placement;
@@ -227,6 +233,16 @@ public partial class Planner
             p.Section.Flag(FlagLevel.Review, ReviewFlag.SpecialRequest, proposal.Explanation);
         }
         proposal.Applied = true;
+    }
+
+    // Existing unassigned sections may stay unassigned, but a manual change must
+    // never strand a previously assigned lecture or discussion. Check this both
+    // when creating a preview and immediately before the atomic apply step.
+    private static void ValidateAssignmentsPreserved(IReadOnlyDictionary<Placement, Placement> copies)
+    {
+        foreach (var (before, after) in copies)
+            if (before.Room != null && after.Room == null || before.Time != null && after.Time == null)
+                throw new ArgumentException($"Cannot leave {before.Label} without its room or meeting time. Every displaced section needs a checked replacement; nothing changed.");
     }
 
     private bool TimeAllowed(SectionRequest s, MeetingTime t) =>

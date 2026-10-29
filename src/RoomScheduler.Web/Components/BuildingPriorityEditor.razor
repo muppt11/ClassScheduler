@@ -1,0 +1,55 @@
+@inject PlanningService Planning
+
+<details open>
+    <summary>Building priorities and preferred hours</summary>
+    <p class="hint">Try GDC first, then nearby buildings in the order you choose. These are preferences; room fit, instructor availability, protected times, and offline rooms still apply.</p>
+    <form @onsubmit="Save" @onsubmit:preventDefault>
+        <div class="form">
+            <label>Building priority</label>
+            <label class="inline"><input type="checkbox" @bind="_enabled" /> Use building priorities</label>
+            <label for="priority-buildings">Buildings, first to last</label>
+            <input id="priority-buildings" placeholder="GDC, RLP, ECJ" @bind="_buildings" />
+            <label for="priority-start">Preferred start</label>
+            <input id="priority-start" type="time" required value="@_start" @onchange="e => _start = e.Value?.ToString() ?? string.Empty" />
+            <label for="priority-end">Preferred finish</label>
+            <input id="priority-end" type="time" required value="@_end" @onchange="e => _end = e.Value?.ToString() ?? string.Empty" />
+            <label>Room selection</label>
+            <div>
+                <label class="inline"><input type="checkbox" @bind="_history" /> Consider where this professor taught in active past schedules</label>
+                <label class="inline"><input type="checkbox" @bind="_controlled" /> Prefer CS-controlled space during its recorded control hours</label>
+            </div>
+        </div>
+        <div class="controls"><button type="submit">Save building priorities</button><a href="chatbot">Review priorities with the chatbot</a></div>
+    </form>
+    @if (_error != null) { <p class="problems" role="alert">@_error</p> }
+    @if (_saved) { <p class="summary" role="status">Saved in this browser. @(Planning.LatestPlan == null ? "These priorities apply to your next schedule." : "Rebuild the schedule to apply these priorities.")</p> }
+</details>
+
+@code {
+    private bool _enabled, _history, _controlled, _saved;
+    private string _buildings = "", _start = "", _end = "";
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        var settings = Planning.Rules.BuildingPriority;
+        _enabled = settings.Enabled; _history = settings.UseFacultyHistory; _controlled = settings.PreferControlledRooms;
+        _buildings = string.Join(", ", settings.Buildings);
+        _start = settings.Start.ToString(@"hh\:mm"); _end = settings.End.ToString(@"hh\:mm");
+    }
+
+    private void Save()
+    {
+        _error = null; _saved = false;
+        try
+        {
+            if (!TimeSpan.TryParse(_start, out var start) || !TimeSpan.TryParse(_end, out var end))
+                throw new ArgumentException("Enter a preferred start and finish time.");
+            Planning.SetBuildingPriorities(new() { Enabled = _enabled, Start = start, End = end,
+                Buildings = _buildings.Split(new[] { ',', ';', ' ', '>' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+                UseFacultyHistory = _history, PreferControlledRooms = _controlled });
+            _saved = true;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

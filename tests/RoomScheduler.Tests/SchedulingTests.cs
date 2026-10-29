@@ -3,7 +3,7 @@ using Xunit;
 
 namespace RoomScheduler.Tests;
 
-public class SchedulingTests
+public partial class SchedulingTests
 {
     private static Xlsx.Sheet Sheet(string name, params string[][] rows)
     {

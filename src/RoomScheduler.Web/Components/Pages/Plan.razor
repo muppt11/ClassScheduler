@@ -93,7 +93,7 @@
         @foreach (var f in rooms)
         {
             <div class="filerow">
-                <span class="dim">@(f.Name == Planning.RoomsSource ? "in use" : "older")</span>
+                <span class="dim">@(f.Name == Planning.ActiveRoomsFile ? "in use" : "older")</span>
                 <span class="mono">@f.Name</span>
                 <span class="dim">@f.Detail</span>
                 <button class="ghost small" @onclick="() => Remove(f.Name)">remove</button>
@@ -105,7 +105,11 @@
     <div class="upload-step">
         <h3>4. Additional files <span class="opt">(optional)</span></h3>
         <p class="hint">
-            Anything else for this semester. A new Lectures Online room list from the registrar is used for
+            Upload updated spreadsheets here, even with a new filename. The app identifies supported tables by their contents.
+            Newest uploads supply rooms and lecture capture; the newest copy of each historical semester is used.
+            Reference values update on rebuild, with newer matching entries taking precedence over older imports.
+            <a href="chatbot">Review file updates with the chatbot</a> to confirm source files and rebuild using the newest matching inputs.
+            A new Lectures Online room list from the registrar is used for
             recording requests (now using @Planning.LectureCaptureSource, @Planning.LectureCaptureRooms rooms).
             Course Reference and Faculty Reference templates are also accepted here (or as tabs in the Classes App workbook).
             Course Reference: Course, Minimum Room Capacity, Preferred Room Capacity, optional Semester (e.g. Fall 2027).
@@ -133,6 +137,8 @@
         }
         @Messages(FileKind.Other)
     </div>
+
+    <BuildingPriorityEditor />
 
     <p class="hint"><label class="inline"><input type="checkbox" @bind="Planning.Rules.AllowAlternateTimes" />
         Try provisional alternate times when requested/history times cannot be placed</label>
@@ -192,6 +198,10 @@
     {
         <div class="problems rebuild">
             Planning inputs or faculty settings changed. This is the previous schedule; rebuild to apply the changes.
+            @if (_needsRebuild)
+            {
+                <FacultyTrackSave Disabled="_busy" />
+            }
             <button @onclick="Rebuild" disabled="@_busy">@(_busy ? "Working" : "Rebuild now")</button>
         </div>
     }
@@ -208,6 +218,7 @@
         <label>Minimum seats <input type="number" min="0" @bind="_minimumCapacity" /></label>
         <label>Preferred seats <input type="number" min="0" @bind="_preferredCapacity" /></label>
         <button @onclick="SaveBaseline">Save for semester and rebuild</button>
+        <p class="hint">You can also <a href="chatbot">ask the chatbot</a> to set or clear a course's minimum and preferred seats, then review and confirm the semester-specific rebuild.</p>
     </details>
 
     <div class="tabs">
@@ -254,8 +265,13 @@
                             }
                             @if (p.Section.Profile != null)
                             {
-                                <button class="dtoggle track" title="Tenure track (T) or professional track (P): click to switch, then rebuild"
-                                        @onclick="() => ToggleTrack(p.Section)">@TrackLetter(p.Section.Track)</button>
+                                <select title="Faculty track: choose None to remove T or P, then save and rebuild"
+                                        aria-label="@($"Faculty track for {p.Section.Instructor}")"
+                                        @bind:get="p.Section.Track" @bind:set="(FacultyTrack value) => SetTrack(p.Section, value)">
+                                    <option value="@FacultyTrack.Unknown">None</option>
+                                    <option value="@FacultyTrack.Tenure">T</option>
+                                    <option value="@FacultyTrack.Professional">P</option>
+                                </select>
                             }
                             else
                             {
@@ -440,6 +456,11 @@
         _chosen = requests.Any(f => f.Name == Planning.LatestSource)
             ? Planning.LatestSource
             : requests.FirstOrDefault()?.Name ?? "";
+        if (Planning.RequiresRebuild || _plan == null)
+        {
+            var newest = Planning.RecommendedFiles();
+            _chosen = newest.Source; _preferences = newest.Preferences ?? "";
+        }
     }
 
     private Task BuildChosen() => Run(() => Planning.Build(_chosen, _preferences));
@@ -450,10 +471,10 @@
     private static string TrackLetter(FacultyTrack t) =>
         t switch { FacultyTrack.Tenure => "T", FacultyTrack.Professional => "P", _ => "?" };
 
-    /// <summary>Switches a professor between tenure (T) and professional (P) track. Takes effect on the next build.</summary>
-    private void ToggleTrack(SectionRequest s)
+    /// <summary>Sets or clears the professor's saved track. Takes effect on the next build.</summary>
+    private void SetTrack(SectionRequest s, FacultyTrack track)
     {
-        s.Profile!.Track = s.Profile.Track == FacultyTrack.Tenure ? FacultyTrack.Professional : FacultyTrack.Tenure;
+        s.Profile!.SetTrack(track);
         foreach (var p in _plan!.Placements.Where(x => x.Section.Profile == s.Profile))
             p.Section.Track = s.Profile.Track;
         Planning.Faculty.Save();
@@ -487,10 +508,17 @@
                                    (expected == FileKind.Other ? "" : " To keep it anyway, add it under 4. Additional files."), false));
                 else
                 {
-                    _messages.Add(info.Kind == expected || (expected == FileKind.Other && info.Kind == FileKind.LectureCapture)
-                        ? ($"Saved {info.Name}. Same-name files of this type replace their previous version.", true)
-                        : ($"{info.Name} looks like {KindName(info.Kind)}, so it was added there instead.", true));
-                    if (info.Kind == FileKind.Requests) _chosen = info.Name;
+                    _messages.Add((Planning.DescribeUpload(info), true));
+                    if (info.Kind == FileKind.Requests)
+                    {
+                        var newest = Planning.RecommendedFiles();
+                        _chosen = newest.Source; _preferences = newest.Preferences ?? "";
+                    }
+                    else if (info.Kind == FileKind.Preferences)
+                    {
+                        var newest = Planning.RecommendedFiles();
+                        if (newest.Source == _chosen) _preferences = newest.Preferences ?? "";
+                    }
                 }
             }
             catch (Exception ex)
@@ -597,7 +625,7 @@
     /// <summary>Marks or unmarks difficult faculty on their profile. Takes effect on the next build.</summary>
     private void ToggleDifficult(SectionRequest s)
     {
-        s.Profile!.Difficult = !s.Profile.Difficult;
+        s.Profile!.SetDifficult(!s.Difficult);
         foreach (var p in _plan!.Placements.Where(x => x.Section.Profile == s.Profile))
             p.Section.Difficult = s.Profile.Difficult;
         Planning.Faculty.Save();

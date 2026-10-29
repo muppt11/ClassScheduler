@@ -32,6 +32,14 @@ namespace RoomScheduler
         /// <summary>The enrollment cap given to the registrar is room capacity minus this share.</summary>
         public bool AllowAlternateTimes { get; set; } = true;
 
+        /// <summary>Automatic choices prefer this start or later; earlier starts remain a fallback or explicit request.</summary>
+        public TimeSpan PreferredStartTime { get; set; } = TimeSpan.FromHours(9);
+
+        public BuildingPrioritySettings BuildingPriority { get; set; } = new();
+
+        public bool IsEarlyStart(MeetingTime time) => time.Start < PreferredStartTime;
+
+
         public int UnknownEnrollmentSize { get; set; } = 25;
 
         public double RegistrarHeadroom { get; set; } = 0.10;

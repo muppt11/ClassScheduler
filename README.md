@@ -30,15 +30,28 @@ run `dotnet run --project src/RoomScheduler.Web`, and open the address it prints
    2. Past schedules (recommended): each finished semester's registrar export (CNBR, DAYS1,
       BLDG1...). The newest counts as "last time".
    3. Rooms table (optional): only if the registrar sends a new one.
-   4. Additional files (optional): a new Lectures Online room list is used for recording
-      requests; anything else (notes, maps) is kept for reference and can be downloaded again.
+   4. Additional files (optional): upload updated scheduling spreadsheets here. Their contents
+      determine the type: classes, preferences, room inventory, lecture capture, history or references.
+      Ask the chatbot **Review file updates** to see the proposed source files and confirm a rebuild.
+      Unrecognized notes, PDFs and maps stay available for reference and download; they do not update scheduling data.
 
    The app checks each file's contents, so a file added under the wrong step still goes to
    the right one. Files stay in this browser for next time.
 2. **Rooms → Offline.** Check any building or room that's off limits. CPE starts checked.
+   Use **Add a room** on the Rooms page to enter its building code, room number and seat capacity,
+   with optional features, lecture capture, CS-only status and notes. Added rooms stay saved in this
+   browser and survive room-table and lecture-capture-list uploads. Duplicate room names and invalid
+   capacities are rejected. Rebuild to use a newly added room; existing offline-building rules still apply.
+   If an uploaded room table later includes the same room, its inventory details take precedence.
 3. **Faculty.** The track list sets each professor to tenure (T) or professional (P) and
-   marks difficult faculty (D). Each profile also holds times someone can't teach,
-   accommodations and complaints. On the schedule, the **D** and **T**/**P** buttons do the same.
+   marks difficult faculty (D). Use **Save faculty tracks** to confirm the selections and see a
+   saved message. Choices persist when reopening the app in the same browser. The same Save
+   button appears after changing T/P or D on the semester plan. Rebuild to apply them to the schedule.
+   Uncheck T/P in the Faculty track list, or choose **None** in the semester plan's track selector,
+   to remove a track designation. Uncheck D (or click its highlighted button) to remove difficult
+   priority. Cleared designations stay cleared after saving, reopening, and rebuilding, even when
+   an uploaded class or reference sheet contains the old value; the professor and their courses remain. Each profile also holds times someone can't teach,
+   accommodations and complaints. On the schedule, use the **D** button and the **T**/**P**/**None** selector for the same changes.
 4. **Build schedule.** File uploads and settings collapse after a successful build; use **Edit files and settings** to reopen them. Then work through the **Review queue** (problems first).
    **Rebuild** after changing faculty or offline rooms.
 5. **Download workbook.** It contains:
@@ -48,6 +61,47 @@ run `dotnet run --project src/RoomScheduler.Web`, and open the address it prints
    - finals and proctors (exam times and rooms are TBD)
    - a weekly calendar for every room in use plus the GDC rooms, in the Gates template
      layout. Used rooms come first, marked ● with a green tab, after an index sheet
+
+## Building priorities and GDC usage
+
+Semester plan includes **Building priorities and preferred hours**. The default preference is GDC
+between 9:30am and 5pm; enter an ordered list such as `GDC, RLP, ECJ`, adjust the hours, or turn
+building priorities off. Save the settings, then build/rebuild. These choices persist in this browser.
+
+The room score favors buildings in that order, meetings entirely inside the preferred window,
+and CS-controlled space during the control hours recorded in the room inventory. Department-only
+rooms receive that preference throughout the day, but pod/project labs remain ineligible unless
+requested by name. GPC rooms with CS control from 12:30pm receive the control bonus only from
+12:30pm; earlier use still carries the existing registrar-agreement notice.
+
+Active uploaded history can guide room choice when a professor taught in the building in a prior
+semester, even for a different course. The assignment explanation identifies that semester.
+The history and controlled-space preferences can each be switched off. Capacity, offline rooms,
+faculty accommodations/unavailability, protected times and room eligibility remain enforced.
+Requested class times remain available outside the preferred window, and unrequested starts before
+9am remain a fallback. The planner can use other buildings/times when needed; this bounded,
+weighted search does not prove maximum possible GDC occupancy.
+
+Chatbot examples:
+
+- `Fill up rooms in GDC as much as possible between 9:30 and 5 PM`
+- `Prioritize GDC, then RLP, between 9:30am and 5pm`
+- `Show building priorities`
+- `How full is GDC between 9:30am and 5pm?`
+- `Which GDC rooms do we control?`
+- `Did Smith teach in GDC in previous semesters?`
+- `Disable building priorities`
+
+A change request shows the proposed order/window and source workbook before offering **Confirm
+building priorities**. Confirmation saves the settings and rebuilds when files are available,
+replacing manual room/time moves. Before files are loaded, confirmation saves the settings for
+the next build. Files/settings/schedule changes after review invalidate the confirmation.
+
+Usage reports show scheduled sections and booked room-hours within the window compared with
+weekday inventory window-hours. They measure only the uploaded plan, include discussions, and
+exclude offline and general-use-ineligible pod/project rooms. They are not campus-wide availability
+or a promise that every inventory hour can be scheduled. If a rebuild is pending, the report labels
+assignments as belonging to the previous schedule.
 
 ## The rules
 
@@ -132,9 +186,29 @@ in the order Course, Minimum Room Capacity, Preferred Room Capacity, Semester. C
 same number as Classes App (e.g. 314, 398T); a topics-course baseline applies to every section
 with that number. Semester is the Classes App label, e.g. `Fall 2027`; blank applies to all terms.
 Use separate rows or files for semester exceptions; later matching rows/files override earlier
-ones. Reference files are read oldest first, then tabs in the selected Classes App workbook.
+ones. Standalone reference files and reference tabs in the selected class/preference workbooks
+are applied together in upload order, oldest first; newer matching data wins regardless of which
+file contains the tab.
 The Semester plan baseline editor takes precedence over both and persists by semester/course.
 It displays the current minimum/preferred values and rebuilds the plan when saved.
+
+The chatbot supports the same editor. For example:
+
+- `Set 103F minimum seats to 40 and preferred seats to 60`
+- `Set the minimum seats for 103F to 50` (keeps the existing preferred value)
+- `Clear preferred for 103F`, `Set 103F minimum seats to 0`, or `Clear the room baseline for 103F`
+- `Show baseline for 103F` or `What is the difference between minimum and preferred?`
+
+A request previews the current and proposed values, the source workbook, the semester, and the
+number of affected sections before offering **Confirm course baseline**. Confirmation saves
+and rebuilds, replacing manual room/time moves. The baseline applies to every section with that
+course number in the selected semester and persists after reopening; other semesters are unaffected.
+The source workbook must identify Semester and Year. Unknown courses, conflicting semesters,
+negative/fractional counts, and preferred values below a positive minimum require clarification.
+0 clears a value without removing enrollment requirements or changing the registrar's 10% rule.
+Missing details carry into follow-ups; updated files or settings invalidate an earlier confirmation.
+A one-time room search such as `find 103F a room with at least 40 seats` does not save a baseline.
+If saving succeeds but rebuilding fails, the bot says so and keeps the previous schedule visible.
 
 Minimum Room Capacity is a **hard physical-seat floor**, even after historical downsizing.
 Preferred Room Capacity is a **scoring preference**, so other preferences and availability may
@@ -146,9 +220,11 @@ minus 10% supplies a provisional expected size; without a baseline it is 25, fla
 The existing Classes App “Minimum Room Size Needed” remains the projected enrollment input.
 There is no separately verified current-enrollment column in these request samples.
 
-Faculty Reference accepts T and P/PTF. It fills unknown profile tracks; existing saved profiles
-and edits in Faculty or the schedule take precedence. Remove a reference file to stop future
-imports; already saved faculty profiles remain editable and reusable. Matching still uses the
+Faculty Reference accepts T and P/PTF. Newer imported values replace older imported values.
+Explicit edits in Faculty or the schedule, including cleared D/T/P designations, take precedence.
+Import provenance is saved with each profile, so future uploads can refresh source data without
+undoing manual choices. Remove a reference file to stop future imports; saved profiles remain
+editable and reusable. Matching still uses the
 existing surname key, so two instructors with the same surname need manual verification.
 Missing tracks produce one informational plan note, rather than flagging every section for review.
 Unknown tracks retain lowest priority; tenure-specific constraints require a known track.
@@ -180,7 +256,56 @@ feasible slots when asked. It can explain course placements, show room occupancy
 answer grounded schedule questions. Unknown or ambiguous requests prompt for missing details.
 Searches now accept building restrictions (`in GDC`, `outside GDC`), named days, `after 2pm`,
 `before 5pm`, `no Fridays`, `same room`, `same time`, smaller/larger rooms, seat limits
-(`at least 45 seats` / `at most 80 seats`), lecture capture, and `without moving other classes`.
+(`at least 45 seats` / `at most 80 seats` / `no more than 60 seats` / `under 60 seats`), lecture capture, and `without moving other classes`.
+Natural requests such as `a room that is smaller` and pasted course/instructor labels are supported.
+`Unused room` or `has not been used` requires a room with no assignments anywhere in the loaded
+plan, including discussions; it does not claim the room has never been used campus-wide.
+For example: `439H (Elnozahy): find a smaller room, no more than 60 seats, that has not been used`.
+Room-only requests keep the current meeting time, including follow-ups such as `under 50 seats`.
+`Allow used rooms` removes the unused-room restriction; swaps explain when it prevents an exchange.
+Course selection also supports instructor surnames (`move Elnozahy to Tuesday at 2pm`) and
+source rows (`move row 124 to Tuesday at 2pm`). Exact course numbers take priority over title
+words; conflicting course/instructor selectors require clarification. A close spelling match is
+suggested for confirmation before a move is checked. Multiple named rooms prompt a choice and
+retain the original time and seat constraints.
+
+Day and time requests also support:
+
+- `Make comp arch one day a week` (asks which weekday), or `Find one-day options for comp arch`.
+- `Change its days to Tuesday and Thursday`, `Move it to Friday afternoon`, or `Tuesday morning`.
+- `Friday from 2 to 5pm`, `Friday 14:00-16:00`, or `Friday at 2pm for 90 minutes`.
+- `30 minutes later`, `one hour earlier`, or `finish at 4pm` as follow-ups.
+
+Frequency/day-only changes preserve the section's **current weekly meeting hours**, distributing them
+across the chosen days. Start-only requests keep the per-meeting duration. An explicit duration or
+start/end range takes precedence; changes to weekly hours are flagged for contact-hour review.
+An unmarked time such as `at 2` prompts for am/pm; it is inferred only with a named morning/afternoon/evening.
+Relative shifts use the currently checked preview when available. All proposals still require a valid
+room for each affected section, respect instructor and scheduling constraints, and wait for explicit Apply.
+The supported scheduling week is Monday through Friday; requests outside it prompt for a weekday.
+
+Automatic planning and chatbot time searches prefer starts at **9am or later**. Starts before 9am
+(including 8am and 8:30am) remain fallbacks when later times are infeasible. Current submitted
+time preferences and explicit chat requests for 8am are honored, subject to scheduling constraints.
+An 8am time from history alone does not count as a current request: when alternate times are
+allowed, later provisional slots are checked first. Room-only changes keep the existing time.
+Discussion scheduling follows the same preference while preserving times requested in discussion notes.
+
+Use `find comp arch the smallest feasible room` to prefer capacity, or `fewest disruptions` to
+return to ranking by affected sections. Option labels and previews show room capacities; selections
+and comparisons explain expected class size, spare seats, timing changes, and affected sections.
+`Compare GDC 1.100 and RLP 1.104` reports inventory features, room fit, and current-time occupancy
+without discarding a pending preview. `How many seats in that room?` explains the selected preview.
+`Which classes have oversized rooms?` lists room-fit problems by spare seats, and `what does
+Elnozahy teach?` lists their assignments from the current plan.
+
+Availability queries apply building, capacity, lecture-capture and unused-room filters and remember
+them while clarifying the interval: `which rooms are free in GDC under 60 seats?`, then
+`Tuesday 2pm-3pm`. These query filters do not change a pending move. Seat ranges such as
+`between 35 and 60 seats` and `60 seats max` work in move and availability requests. A seat-limit
+follow-up to a swap keeps searching swap partners. `Fridays are okay`, `actually in GDC`, and
+`any size` explicitly relax the corresponding day, building, or seat restriction.
+
 Conditions carry into follow-ups and are shown above the message box. `Any room, any time`
 clears location/time restrictions; **Reset request** or `start over` clears the whole request.
 The search checks up to 600 room/time candidates, ranks up to nine feasible moves by affected
@@ -198,12 +323,32 @@ kept in memory for this browser session and survives navigation, but not page re
 
 Changing inputs used by the plan (including room data, history, faculty, rules, and course
 baselines) requires a rebuild. The previous schedule remains visible with a notice, while
-chat changes and schedule downloads are disabled until it is rebuilt. Stale previews are
+schedule changes and downloads are disabled until it is rebuilt. Chatbot file questions and
+update review/confirmation remain available while a rebuild is pending. Stale previews are
 cleared and rejected by the planning service. A failed rebuild retains the last valid plan.
 Missing or empty selected preference files produce an error rather than silently removing
 all preferences. Upload/replacement/deletion storage failures restore the previous saved files.
 Within a reference sheet, semester-specific baselines take precedence over generic rows
 regardless of their order.
+
+For future updates, use **Additional files** with either the same filename (replace its previous
+version) or a new filename. Room inventory and lecture-capture lists use the newest uploaded
+supported table. History combines active files, taking the newest uploaded copy for each semester.
+Reference imports apply newer matching values at rebuild time; saved manual faculty choices,
+room baselines, manually added rooms, and offline settings remain in force.
+
+In the chatbot, ask **Which files are active?**, **Did you get my updated files?**, or **Review file
+updates**. The report distinguishes loaded data from the sources of the currently built schedule.
+Review recommends the newest Classes App workbook and a matching separate preference file (when
+newer than embedded preferences, or when no embedded preferences exist). You can select different
+files on Semester plan instead. Newness means upload order, rather than dates inferred from filenames.
+
+The chatbot shows the source filenames and section count, explains that rebuilding replaces manual
+room/time moves, and offers **Confirm rebuild with newest files**. Confirmation rebuilds using those
+inputs and reports completion and any sections still needing placement. A file, setting, or schedule
+change after review requires another review. **Cancel updates** keeps the uploads without rebuilding.
+A failed rebuild leaves the previous schedule and faculty profiles intact. Reference-only files
+are identified as such; arbitrary PDF or note contents are not treated as scheduling updates.
 
 For the explicit command form, use a course number or exact title that identifies one section. If several sections share it,
 use `title / instructor / row N`, where N is the original spreadsheet row. Use explicit am/pm;
@@ -215,6 +360,11 @@ unavailability, tenure lunch/graduate-slot rules, accommodations, and room/instr
 It first searches replacement rooms for directly displaced sections, then a bounded chain of
 room changes (up to four additional displaced sections and 4,000 branch attempts), without
 changing any displaced meeting time. The requested section stays fixed at its proposed destination.
+Every previously assigned lecture or discussion must retain a room and meeting time. This is checked
+when creating the preview and again before applying it. All affected classes, replacement rooms,
+and capacities appear in the preview and apply together; if any class cannot be rehoused, the
+request is rejected and every original assignment remains unchanged. Existing unassigned sections
+elsewhere in the plan do not prevent a valid room move.
 Apply rechecks the entire proposed schedule and rejects stale previews. No external availability
 feed exists: availability here means the uploaded/planned schedule and configured offline rooms.
 Weekly-hour exceptions and registrar permission before CS-controlled GDC hours still require review.
@@ -316,3 +466,15 @@ src/RoomScheduler.Web      the website (Blazor WebAssembly): Semester plan, Facu
 src/RoomScheduler.Cli      console version
 tools/, class schedule resources/   how course_history.csv was made from scanned catalogs
 ```
+
+On the **Faculty** page, select a professor and open **Remove professor permanently**.
+Review the scope, confirm the professor's name, and click **Permanently remove professor**.
+The saved profile (including notes, accommodations, complaints, track and priority) is deleted;
+a surname and display-name marker keeps later uploads and rebuilds from recreating it. Their classes and
+discussions are also excluded from future builds. Rebuild to update
+the current plan. Original uploaded files remain available. Removal is stored in this browser,
+and does not synchronize to other browsers.
+To include a removed professor again, open **Removed professors** on the Faculty page and click
+**Add back**, then rebuild. Their classes and discussions from the current files become eligible
+again, and track/priority can be imported from those files. Deleted notes, complaints and
+accommodations are not recovered; re-enter them as needed. The restored status persists in this browser.

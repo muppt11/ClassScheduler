@@ -3,7 +3,7 @@ using Xunit;
 
 namespace RoomScheduler.Tests;
 
-public class SwapTests
+public partial class SwapTests
 {
     private static (Planner Planner, Planner.Plan Plan, List<Room> Rooms, SchedulingConversation Chat) Fixture(bool third = false)
     {
@@ -219,6 +219,31 @@ public class SwapTests
         var f=Fixture(true); Send(f,"find room swaps for comp arch"); var first=f.Chat.Proposal;
         Assert.NotNull(first); Send(f,"the second one"); Assert.NotNull(f.Chat.Proposal);
         Assert.NotSame(first,f.Chat.Proposal); Assert.Contains("Selected option 2",Last(f.Chat));
+    }
+
+    [Fact]
+    public void Seat_limit_followup_refines_swap_partners_instead_of_switching_to_a_move()
+    {
+        var f = Fixture(true); Send(f, "swap rooms for comp arch");
+        Send(f, "under 45 seats");
+        Assert.NotNull(f.Chat.Proposal); Assert.Contains("room-only swap", Last(f.Chat));
+        Assert.Equal(2, f.Chat.Proposal!.ProposedChanges.Count);
+        var change = f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement.Section.Course == "429");
+        Assert.Equal(f.Rooms[2], change.Room);
+        Assert.Contains("40 seats", f.Chat.Suggestions.First());
+        Assert.DoesNotContain("50 seats", f.Chat.Suggestions.First());
+    }
+
+    [Fact]
+    public void Selected_swap_and_comparisons_keep_capacity_and_spare_seats_visible()
+    {
+        var f = Fixture(true); Send(f, "swap rooms for comp arch");
+        Send(f, "the second one");
+        Assert.Contains("seats", Last(f.Chat)); Assert.Contains("spare", Last(f.Chat));
+        var preview = f.Chat.Proposal;
+        Send(f, "compare the options");
+        Assert.Contains("40 seats", Last(f.Chat)); Assert.Contains("50 seats", Last(f.Chat));
+        Assert.Same(preview, f.Chat.Proposal);
     }
 
 }

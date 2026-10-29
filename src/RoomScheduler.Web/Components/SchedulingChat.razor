@@ -9,8 +9,8 @@
     <p class="hint">Ask about your schedule, compare rooms and times, or explore swaps. Every proposed change is checked before you review and apply it.</p>
     <div class="chat-history" @ref="_chatLog" role="log" aria-live="polite" aria-label="Scheduling assistant conversation">
         <div class="chat-message assistant-message"><b>Assistant</b><p>Tell me what you want to improve. For example: “Find comp arch a slot in GDC after 2pm, no Fridays”,
-            “Find a smaller room but keep the same time”, or “Swap rooms for comp arch with data structures”.
-            I can compare up to three checked options, remember your follow-up conditions, and explain who would move. You approve the preview before anything changes.</p></div>
+            “Make comp arch one day a week”, “Move it to Friday afternoon”, “Find a smaller room but keep the same time”, or “Swap rooms for comp arch with data structures”.
+            I can compare rooms by capacity and availability, find the smallest feasible room, remember your follow-up conditions, and explain who would move. You approve the preview before anything changes. Try “Set 103F minimum seats to 40 and preferred seats to 60” to review a semester baseline, or “Prioritize GDC, then RLP, between 9:30am and 5pm” or “How full is GDC?” Ask “Which files are active?” or “Review file updates” to check newer uploads and confirm a rebuild.</p></div>
         @foreach (var message in _chatMessages)
         {
             <div class="chat-message @(message.User ? "user-message" : "assistant-message")"><b>@(message.User ? "You" : "Assistant")</b><p>@message.Text</p></div>
@@ -19,8 +19,8 @@
     @if (_chatMessages.Count == 0)
     {
         <div class="chat-suggestions" aria-label="Example requests">
-            @foreach (var example in new[] { "What needs attention?", "Which classes have no room?", "What can you do?" })
-            { <button type="button" class="ghost" disabled="@(Blocked || _sending)" @onclick="() => SendMessage(example)">@example</button> }
+            @foreach (var example in new[] { "Show building priorities", "How full is GDC?", "Which files are active?", "Review file updates", "What needs attention?", "Which classes have oversized rooms?", "What can you do?" })
+            { <button type="button" class="ghost" disabled="@(Disabled || _sending)" @onclick="() => SendMessage(example)">@example</button> }
         </div>
     }
     @if (Conversation.RequestContext is string context)
@@ -32,29 +32,31 @@
         <div class="chat-suggestions" aria-label="Suggested replies">
             @foreach (var choice in Conversation.Suggestions)
             {
-                <button type="button" class="ghost" disabled="@(Blocked || _sending)" @onclick="() => SendMessage(choice)">@choice</button>
+                <button type="button" class="ghost" disabled="@(Disabled || _sending)" @onclick="() => SendMessage(choice)">@choice</button>
             }
         </div>
     }
     <form class="chat-composer" @onsubmit="SendChat" @onsubmit:preventDefault>
         <label class="chat-input-label" for="assistant-request">Message the scheduling assistant</label>
         <input id="assistant-request" @bind="_overrideText" @bind:event="oninput" placeholder="Ask for help or describe a room/time change…" autocomplete="off" />
-        <button type="submit" disabled="@(Blocked || _sending)">@(_sending ? "Checking…" : "Send")</button>
+        <button type="submit" disabled="@(Disabled || _sending)">@(_sending ? "Checking…" : "Send")</button>
     </form>
     @if (_sending) { <p role="status">Checking rooms, swap partners and scheduling constraints…</p> }
     <label class="inline"><input type="checkbox" @bind="_allowOversized" /> Allow an intentional oversized-room exception for the next request</label>
     <p class="hint">Uses the current schedule in this browser. Room-only swaps keep times; room-and-time swaps are labeled in the preview. Rebuild or reload resets manual moves.</p>
-    @if (Blocked) { <p class="warn">Planning inputs changed. Rebuild on Semester plan before requesting or applying changes.</p> }
+    @if (Blocked) { <p class="warn">Planning inputs changed. Ask “Review file updates” to confirm the sources and rebuild here, or rebuild on Semester plan before requesting or applying schedule changes.</p> }
     @if (_proposal != null)
     {
         <div class="assistant-proposal">
             <h3>Proposed changes — not yet applied</h3>
             <p>@_proposal.Explanation</p>
+            @if (_proposal.ProposedChanges.Count > 1)
+            { <p>Every affected class has a checked room assignment below. All changes apply together; if any assignment fails validation, the schedule stays unchanged.</p> }
             <div class="tablewrap"><table>
                 <thead><tr><th>Section</th><th>Before</th><th>Proposed</th></tr></thead>
                 <tbody>
                     @foreach (var change in _proposal.ProposedChanges)
-                    { <tr><td>@change.Placement.Section.Title — @change.Placement.Section.Instructor<div class="sub">Source row @(change.Placement.Section.SourceRow + 1)</div></td><td>@change.BeforeRoom?.DisplayName @change.BeforeTime</td><td>@change.Room.DisplayName @change.Time</td></tr> }
+                    { <tr><td>@change.Placement.Section.Title — @change.Placement.Section.Instructor<div class="sub">Source row @(change.Placement.Section.SourceRow + 1)</div></td><td>@change.BeforeRoom?.DisplayName @if (change.BeforeRoom != null) { <span>(@change.BeforeRoom.Capacity seats)</span> } @change.BeforeTime</td><td>@change.Room.DisplayName <span>(@change.Room.Capacity seats)</span> @change.Time<div class="sub">Expected class size: @change.Placement.Section.SizeForRoom · Spare seats: @(change.Room.Capacity - change.Placement.Section.SizeForRoom)</div></td></tr> }
                 </tbody>
             </table></div>
             <button @onclick="ApplyOverride" disabled="@(Blocked || _sending)">Apply reviewed changes</button>
@@ -86,14 +88,13 @@
     private Task SendChat() => SendMessage(_overrideText);
     private async Task SendMessage(string request)
     {
-        if (Blocked || _sending || string.IsNullOrWhiteSpace(request)) return;
+        if (Disabled || _sending || string.IsNullOrWhiteSpace(request)) return;
         _overrideText = ""; _sending = true;
         StateHasChanged();
         await Task.Delay(40);
         try
         {
-            Conversation.Send(Planning.LatestPlan, Planning.Rooms, Planning.ProposeOverride, request, _allowOversized,
-                Planning.ProposeMove, Planning.ProposeSwap);
+            Planning.SendChat(request, _allowOversized);
             _allowOversized = false;
         }
         catch (Exception ex) { Conversation.Messages.Add(new(false, "I couldn't complete that request. " + ex.Message + " Your schedule is unchanged.")); }

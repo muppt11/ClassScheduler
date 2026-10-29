@@ -49,7 +49,7 @@ public static class ReferenceSheets
                 else
                 {
                     string name = Get("Professor");
-                    if (Names.IsPlaceholder(name)) continue;
+                    if (Names.IsPlaceholder(name) || faculty.IsRemoved(Names.Surname(name))) continue;
                     var track = Get("Tenure or PTF").ToLowerInvariant() switch
                     {
                         "t" => FacultyTrack.Tenure,
@@ -58,8 +58,9 @@ public static class ReferenceSheets
                         _ => throw new ArgumentException($"Invalid faculty track for {name}; use T or PTF.")
                     };
                     var profile = faculty.GetOrAdd(Names.Surname(name), name);
-                    // Saved edits and existing profiles take precedence over reusable imports.
-                    if (profile.Track == FacultyTrack.Unknown) profile.Track = track;
+                    // Explicit edits win; newer imports may refresh older imported values.
+                    if (!profile.TrackExplicitlySet && (profile.Track == FacultyTrack.Unknown || profile.ImportedTrack.HasValue))
+                    { profile.Track = track; profile.ImportedTrack = track; }
                 }
             }
         }

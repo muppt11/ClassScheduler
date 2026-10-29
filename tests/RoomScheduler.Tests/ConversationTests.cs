@@ -3,14 +3,14 @@ using Xunit;
 
 namespace RoomScheduler.Tests;
 
-public class ConversationTests
+public partial class ConversationTests
 {
-    private static (SchedulingConversation Chat, Planner Planner, Planner.Plan Plan, List<Room> Rooms) Fixture(bool duplicate = false, bool abbreviated = false)
+    private static (SchedulingConversation Chat, Planner Planner, Planner.Plan Plan, List<Room> Rooms) Fixture(bool duplicate = false, bool abbreviated = false, bool catalog = false)
     {
         var sheet = new Xlsx.Sheet {Name = "Classes App"};
         sheet.Rows.AddRange(new[] {
             new List<string> {"Title", "Professor", "Minimum Room Size Needed"},
-            new List<string> {abbreviated ? "429 COMP ORGANIZATN AND ARCH" : "429 COMPUTER ARCHITECTURE", "SMITH A", "30"},
+            new List<string> {catalog ? "439H PRINS OF COMPUTER SYS: HONORS - CSB" : abbreviated ? "429 COMP ORGANIZATN AND ARCH" : "429 COMPUTER ARCHITECTURE", catalog ? "ELNOZAHY,, M" : "SMITH A", "30"},
             new List<string> {"314 DATA STRUCTURES", "JONES B", "30"}
         });
         if (duplicate) sheet.Rows.Add(new() {"429 COMPUTER ARCHITECTURE", "DOE M", "30"});
@@ -505,6 +505,98 @@ public class ConversationTests
         var f=Fixture(true); Send(f,"move comp arch to Tuesday at 2pm");
         Send(f,"row 9999999999999999999999999");
         Assert.Null(f.Chat.Proposal); Assert.Contains("Which one",Last(f.Chat));
+    }
+
+    [Fact]
+    public void Pasted_catalog_request_finds_smaller_unused_room_with_seat_limit()
+    {
+        var f = Fixture(catalog: true); var target = f.Plan.Placements[0];
+        target.Room = f.Rooms[0];
+        var unused = new Room { Building = "RLP", RoomNumber = "1.106", Capacity = 55 };
+        f.Rooms.Add(unused);
+        f.Plan.Discussions.Add(new Placement { Section = f.Plan.Placements[1].Section,
+            Room = f.Rooms[1], Time = MeetingTime.Of("TTH", 15, 0, 16, 0) });
+        Send(f, "439H PRINS OF COMPUTER SYS: HONORS - CSB ELNOZAHY,, M - this room is too large. Can you adjust to a room that is smaller (maybe a room that holds no more than 60 seats and has not been used)");
+        var c = Assert.Single(f.Chat.Proposal!.ProposedChanges);
+        Assert.Same(target, c.Placement); Assert.Same(unused, c.Room);
+        Assert.Equal(target.Time, c.Time); // M in the instructor label is not a Monday request.
+        Assert.Contains("55 seats", Last(f.Chat));
+        Assert.Contains("at most 60 seats", Last(f.Chat));
+        Assert.Contains("no assignments", Last(f.Chat));
+        Assert.Same(f.Rooms[0], target.Room);
+    }
+
+    [Theory]
+    [InlineData("a room that is smaller")]
+    [InlineData("a smaller room")]
+    [InlineData("a room that's smaller")]
+    [InlineData("a room that’s smaller")]
+    [InlineData("an unused room")]
+    public void Natural_room_requests_after_lookup_keep_course_and_current_time(string request)
+    {
+        var f = Fixture(); f.Plan.Placements[0].Room = f.Rooms[0];
+        f.Rooms.Add(new Room { Building = "RLP", RoomNumber = "1.106", Capacity = 50 });
+        Send(f, "where is comp arch?");
+        Send(f, "can you find " + request + " for it?");
+        Assert.NotNull(f.Chat.Proposal);
+        var c = f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement == f.Plan.Placements[0]);
+        Assert.Equal(f.Plan.Placements[0].Time, c.Time);
+        Assert.True(c.Room.Capacity < 200);
+    }
+
+    [Theory]
+    [InlineData("under 50 seats", 49)]
+    [InlineData("no more than 50 seats", 50)]
+    [InlineData("fewer than 50 students", 49)]
+    public void Seat_limit_followups_recompute_options_and_preserve_the_target(string limit, int maximum)
+    {
+        var f = Fixture(); f.Plan.Placements[0].Room = f.Rooms[0];
+        f.Rooms.Add(new Room { Building = "RLP", RoomNumber = "1.106", Capacity = 49 });
+        f.Rooms.Add(new Room { Building = "RLP", RoomNumber = "1.107", Capacity = 50 });
+        Send(f, "find comp arch a smaller room"); Send(f, limit);
+        Assert.NotNull(f.Chat.Proposal);
+        foreach (var option in f.Chat.Suggestions.Where(s => s.StartsWith("Option ")).ToList())
+        {
+            Send(f, option);
+            var c = f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement == f.Plan.Placements[0]);
+            Assert.True(c.Room.Capacity <= maximum);
+            Assert.Equal(f.Plan.Placements[0].Time, c.Time);
+        }
+    }
+
+    [Fact]
+    public void Unused_room_excludes_other_times_and_discussion_assignments()
+    {
+        var f = Fixture(); f.Plan.Placements[0].Room = f.Rooms[0];
+        f.Plan.Placements[1].Room = f.Rooms[1];
+        f.Plan.Placements[1].Time = MeetingTime.Of("TTH", 14, 0, 15, 0);
+        f.Plan.Discussions.Add(new Placement { Section = f.Plan.Placements[1].Section,
+            Room = f.Rooms[2], Time = MeetingTime.Of("TTH", 15, 0, 16, 0) });
+        Send(f, "find comp arch an unused room no more than 60 seats");
+        Assert.Null(f.Chat.Proposal);
+        Assert.Contains("no assignments", Last(f.Chat));
+        Assert.Contains("unchanged", Last(f.Chat));
+    }
+
+    [Fact]
+    public void Swap_followup_explains_unused_room_condition_instead_of_dropping_it()
+    {
+        var f = Fixture(); f.Plan.Placements[0].Room = f.Rooms[0];
+        Send(f, "find comp arch an unused room no more than 60 seats");
+        Send(f, "can I swap comp arch?");
+        Assert.Null(f.Chat.Proposal);
+        Assert.Contains("unused-room condition is still active", Last(f.Chat));
+    }
+
+    [Fact]
+    public void Contradictory_seat_bounds_are_explained_and_can_be_refined()
+    {
+        var f = Fixture();
+        Send(f, "find comp arch a room at least 50 seats and under 40 seats");
+        Assert.Null(f.Chat.Proposal); Assert.Contains("minimum seat count exceeds", Last(f.Chat));
+        Send(f, "at least 30 seats");
+        // The upper bound remains active; there are no rooms under 40 in this inventory.
+        Assert.Null(f.Chat.Proposal); Assert.Contains("at most 39 seats", Last(f.Chat));
     }
 
 }

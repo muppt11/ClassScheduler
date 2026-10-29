@@ -22,6 +22,7 @@ namespace RoomScheduler
         private readonly PastSchedule _past;
         private readonly FacultyStore _faculty;
         private readonly CourseHistory _departmentHistory;
+        private readonly Dictionary<string, PastSection> _facultyBuildingHistory = new(StringComparer.OrdinalIgnoreCase);
 
         public SchedulingRules Rules { get; }
 
@@ -65,6 +66,9 @@ namespace RoomScheduler
             _past = past;
             _faculty = faculty;
             Rules = rules ?? new SchedulingRules();
+            foreach (var section in past.Sections.OrderByDescending(p => p.SemesterCode))
+                foreach (string instructor in section.Instructors)
+                    if (section.Building.Length > 0 && !section.Online) _facultyBuildingHistory.TryAdd(instructor + "|" + section.Building, section);
         }
 
         public class Plan
@@ -86,14 +90,11 @@ namespace RoomScheduler
 
         public Plan Build(DepartmentWorkbook workbook)
         {
+            Rules.BuildingPriority.Validate();
+            workbook.Sections.RemoveAll(s => !s.InstructorMissing && _faculty.IsRemoved(s.Surname));
+            workbook.Forms.RemoveAll(f => _faculty.IsRemoved(Names.Surname(f.Professor)));
             workbook.MatchForms();
             var plan = new Plan { Semester = workbook.Semester, Workbook = workbook, Rules = Rules };
-
-            int unknownTracks = workbook.Sections.Count(s => !s.InstructorMissing && s.Track == FacultyTrack.Unknown &&
-                _faculty.Find(s.Surname)?.Track is null or FacultyTrack.Unknown);
-            if (unknownTracks > 0)
-                plan.GeneralFlags.Add(new ReviewFlag(FlagLevel.Info, ReviewFlag.NeedsInfo,
-                    $"{unknownTracks} sections have unknown faculty track. Import Faculty Reference or edit profiles; track priority and tenure-only rules require this information."));
 
             foreach (var form in workbook.UnmatchedForms)
                 plan.GeneralFlags.Add(new ReviewFlag(FlagLevel.Review, ReviewFlag.NeedsInfo,
@@ -111,6 +112,11 @@ namespace RoomScheduler
                 Prepare(section);
                 plan.Placements.Add(new Placement { Section = section });
             }
+
+            int unknownTracks = workbook.Sections.Count(s => !s.InstructorMissing && s.Track == FacultyTrack.Unknown);
+            if (unknownTracks > 0)
+                plan.GeneralFlags.Add(new ReviewFlag(FlagLevel.Info, ReviewFlag.NeedsInfo,
+                    $"{unknownTracks} sections have unknown faculty track. Import Faculty Reference or edit profiles; track priority and tenure-only rules require this information."));
 
             var order = plan.Placements
                 .Where(p => !p.Section.Online && Options(p.Section).Count > 0)
@@ -161,9 +167,16 @@ namespace RoomScheduler
             else
             {
                 s.Profile = _faculty.GetOrAdd(s.Surname, s.Instructor);
-                if (s.Profile.Track != FacultyTrack.Unknown) s.Track = s.Profile.Track;
-                else if (s.Track != FacultyTrack.Unknown) s.Profile.Track = s.Track;
-                s.Difficult |= s.Profile.Difficult;
+                if (s.Profile.TrackExplicitlySet || s.Profile.Track != FacultyTrack.Unknown) s.Track = s.Profile.Track;
+                else if (s.Track != FacultyTrack.Unknown)
+                { s.Profile.Track = s.Track; s.Profile.ImportedTrack = s.Track; }
+                if (s.Profile.DifficultExplicitlySet) s.Difficult = s.Profile.Difficult;
+                else
+                {
+                    s.Difficult |= s.Profile.Difficult;
+                    s.Profile.Difficult = s.Difficult;
+                    s.Profile.ImportedDifficult = s.Difficult;
+                }
 
 
                 if (SchedulingRules.IsGraduate(s.Course) && s.Track == FacultyTrack.Professional)
@@ -328,8 +341,23 @@ namespace RoomScheduler
             if (options.Count == 0 && s.Wishes.Times.Count > 0)
                 s.Flag(FlagLevel.Problem, ReviewFlag.Time, "Every requested time is ruled out by policy or the profile.");
 
-            return options;
+            // An old 8am assignment is history, not a current request for 8am.
+            // Keep it available if later provisional slots cannot be placed.
+            if (Rules.AllowAlternateTimes && s.Wishes.Times.Count == 0 && options.Count > 0 &&
+                options.All(o => Rules.IsEarlyStart(o.Time)))
+            {
+                int rank = options.Max(o => o.Rank) + 1;
+                options.AddRange(ProvisionalOptions(s).Where(o => !Rules.IsEarlyStart(o.Time))
+                    .Select(o => o with { Rank = rank }));
+                s.Flag(FlagLevel.Review, ReviewFlag.Time,
+                    "History only offers an early start. Prefer a feasible start at or after " +
+                    MeetingTime.ClockTime(Rules.PreferredStartTime) + "; keep the early time as a fallback and confirm any alternative with the instructor.");
+            }
+            return options.OrderBy(o => EarlyStartUnrequested(s, o)).ToList();
         }
+
+        private bool EarlyStartUnrequested(SectionRequest section, TimeOption option) =>
+            Rules.IsEarlyStart(option.Time) && !section.Wishes.Times.Any(o => o.Time.Equals(option.Time));
 
         /// <summary>
         /// At UT the first digit of a course number is its credit hours, and a
@@ -428,7 +456,7 @@ namespace RoomScheduler
                     if (time.End <= TimeSpan.FromHours(21) && TimeAllowed(s, time))
                         result.Add(new TimeOption(time, 1, "provisional alternative; confirm with instructor"));
                 }
-            return result;
+            return result.OrderBy(o => Rules.IsEarlyStart(o.Time)).ToList();
         }
 
         /// <summary>Try room rearrangement at submitted times, then provisional times for unplaced sections.</summary>
@@ -568,8 +596,10 @@ namespace RoomScheduler
                     if (score == null) continue;
 
                     int total = score.Value - PointsPerRank * (opt.Rank - 1);
-                    if (best == null || total > best.Value.Item3 ||
-                        (total == best.Value.Item3 && room.Capacity < best.Value.Item2.Capacity))
+                    bool early = EarlyStartUnrequested(p.Section, opt);
+                    bool bestEarly = best != null && EarlyStartUnrequested(p.Section, best.Value.Item1);
+                    if (best == null || !early && bestEarly || early == bestEarly &&
+                        (total > best.Value.Item3 || total == best.Value.Item3 && room.Capacity < best.Value.Item2.Capacity))
                         best = (opt, room, total, reasons);
                 }
             }
@@ -613,7 +643,18 @@ namespace RoomScheduler
         {
             var s = p.Section;
             var w = s.Wishes;
-            int score = 0;
+            int score = Rules.BuildingPriority.Score(room, time);
+            if (Rules.BuildingPriority.Enabled && Rules.BuildingPriority.Buildings.Contains(room.Building, StringComparer.OrdinalIgnoreCase))
+            {
+                reasons.Add($"building priority: {room.Building}" + (Rules.BuildingPriority.InWindow(time) ? " within the preferred window" : " outside the preferred window (fallback)"));
+                if (Rules.BuildingPriority.PreferControlledRooms && BuildingPrioritySettings.ControlledAt(room, time))
+                    reasons.Add(room.DepartmentOnly ? "CS-only departmental room" : $"CS-controlled from {MeetingTime.ClockTime(room.CsOwnsFrom!.Value)}");
+                if (Rules.BuildingPriority.UseFacultyHistory && _facultyBuildingHistory.TryGetValue(s.Surname + "|" + room.Building, out var previous))
+                {
+                    score += 40;
+                    reasons.Add($"{s.Surname} taught in {room.Building} in {previous.Semester}");
+                }
+            }
 
             if (w.Rooms.Contains(room.DisplayName, StringComparer.OrdinalIgnoreCase))
             {
@@ -639,12 +680,12 @@ namespace RoomScheduler
                 reasons.Add("WARNING: they asked to avoid this");
             }
 
-            if (s.PastSections.Any(ps => ps.RoomName.Equals(room.DisplayName, StringComparison.OrdinalIgnoreCase)))
+            if (Rules.BuildingPriority.UseFacultyHistory && s.PastSections.Any(ps => ps.RoomName.Equals(room.DisplayName, StringComparison.OrdinalIgnoreCase)))
             {
                 score += PastRoom;
                 reasons.Add($"taught here in {s.PastSections[0].Semester}");
             }
-            else if (s.PastSections.Any(ps => ps.Building.Equals(room.Building, StringComparison.OrdinalIgnoreCase)))
+            else if (Rules.BuildingPriority.UseFacultyHistory && s.PastSections.Any(ps => ps.Building.Equals(room.Building, StringComparison.OrdinalIgnoreCase)))
             {
                 score += PastBuilding;
             }
@@ -700,7 +741,7 @@ namespace RoomScheduler
             if (room.CsOwnsFrom != null && time.Start < room.CsOwnsFrom.Value)
             {
                 score += BeforeCsHours;
-                reasons.Add("before CS's 12:30 hours, registrar must agree");
+                reasons.Add($"before CS's {MeetingTime.ClockTime(room.CsOwnsFrom.Value)} hours, registrar must agree");
             }
 
             // Walking between a professor's back-to-back classes.
@@ -824,7 +865,7 @@ namespace RoomScheduler
                             if (occupied.Concat(plan.Discussions).Any(o => o.Room == room && o.Time!.Overlaps(opt.Time))) continue;
 
                             var why = new List<string>();
-                            int score = -PerDiscussionRank * (opt.Rank - 1) - (room.Capacity - Rules.DiscussionSize);
+                            int score = -PerDiscussionRank * (opt.Rank - 1) - (room.Capacity - Rules.DiscussionSize) + Rules.BuildingPriority.Score(room, opt.Time);
 
                             if (past != null && $"{past.DiscussionBuilding} {past.DiscussionRoom}" == room.DisplayName)
                             {
@@ -842,7 +883,9 @@ namespace RoomScheduler
                             if (Regex.IsMatch(s.Form?.DiscussionRequirements ?? "", "gdc", RegexOptions.IgnoreCase))
                                 score -= WalkCost(_campus.WalkMinutes("GDC", room.Building) ?? 10);
 
-                            if (best == null || score > best.Value.Score)
+                            bool early = Rules.IsEarlyStart(opt.Time) && opt.Source != "discussion notes";
+                            bool bestEarly = best != null && Rules.IsEarlyStart(best.Value.Opt.Time) && best.Value.Opt.Source != "discussion notes";
+                            if (best == null || !early && bestEarly || early == bestEarly && score > best.Value.Score)
                                 best = (opt, room, score, why);
                         }
                     }
@@ -929,7 +972,10 @@ namespace RoomScheduler
                                   - PointsPerRank * (p.Option.Rank - 1);
 
                     var best = BestChoice(p, all, out _);
-                    if (best == null || best.Value.Score <= current + 20) continue;
+                    if (best == null) continue;
+                    bool currentEarly = EarlyStartUnrequested(p.Section, p.Option);
+                    bool bestEarly = EarlyStartUnrequested(p.Section, best.Value.Option);
+                    if (bestEarly && !currentEarly || bestEarly == currentEarly && best.Value.Score <= current + 20) continue;
                     if (best.Value.Room == p.Room && best.Value.Option.Time.Equals(p.Time)) continue;
 
                     string from = $"{p.Time} {p.Room.DisplayName}";
