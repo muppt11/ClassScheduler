@@ -43,11 +43,13 @@ run `dotnet run --project src/RoomScheduler.Web`, and open the address it prints
    browser and survive room-table and lecture-capture-list uploads. Duplicate room names and invalid
    capacities are rejected. Rebuild to use a newly added room; existing offline-building rules still apply.
    If an uploaded room table later includes the same room, its inventory details take precedence.
-3. **Faculty.** The track list sets each professor to tenure (T) or professional (P) and
-   marks difficult faculty (D). Use **Save faculty tracks** to confirm the selections and see a
+3. **Faculty.** One searchable roster combines profiles, track selections, and priority. Choose
+   tenure (T), professional (P), or None in each row and mark difficult faculty (D).
+   Select a name to edit availability, accommodations, notes, and complaints.
+   Use **Save faculty tracks** to confirm the selections and see a
    saved message. Choices persist when reopening the app in the same browser. The same Save
    button appears after changing T/P or D on the semester plan. Rebuild to apply them to the schedule.
-   Uncheck T/P in the Faculty track list, or choose **None** in the semester plan's track selector,
+   Choose **None** in the Faculty roster or the semester plan's track selector
    to remove a track designation. Uncheck D (or click its highlighted button) to remove difficult
    priority. Cleared designations stay cleared after saving, reopening, and rebuilding, even when
    an uploaded class or reference sheet contains the old value; the professor and their courses remain. Each profile also holds times someone can't teach,
@@ -492,7 +494,9 @@ a surname and display-name marker keeps later uploads and rebuilds from recreati
 discussions are also excluded from future builds. Rebuild to update
 the current plan. Original uploaded files remain available. Removal is stored in this browser,
 and does not synchronize to other browsers.
-To include a removed professor again, open **Removed professors** on the Faculty page and click
-**Add back**, then rebuild. Their classes and discussions from the current files become eligible
+To include a removed professor again, open **Past professors** on the Faculty page and click
+**Add back**, then rebuild. The Current professors and Past professors buttons are always visible,
+and both lists can be searched. Removing a professor opens Past professors automatically;
+adding one back returns to their current profile. Their classes and discussions from the current files become eligible
 again, and track/priority can be imported from those files. Deleted notes, complaints and
 accommodations are not recovered; re-enter them as needed. The restored status persists in this browser.

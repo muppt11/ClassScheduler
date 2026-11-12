@@ -309,18 +309,39 @@ table.grid tbody tr:nth-child(even) { background: transparent; }
 
 /* faculty */
 
-.faculty { display: grid; grid-template-columns: 240px 1fr; gap: 22px; align-items: start; }
-.faculty .list { display: flex; flex-direction: column; gap: 2px; max-height: 75vh; overflow-y: auto; }
-.faculty .list input { width: 100%; margin-bottom: 6px; }
+.faculty-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 18px 0; }
+.faculty-views { display: flex; flex-wrap: wrap; gap: 6px; }
+.faculty-views .on { background: var(--orange); color: #fff; }
+.faculty-toolbar input { min-width: 220px; padding: 7px 9px; }
+.faculty-status { padding: 10px 12px; background: #f0f6ed; border-left: 3px solid var(--ok); }
+.faculty { display: grid; grid-template-columns: minmax(320px, 40%) minmax(0, 1fr); gap: 22px; align-items: start; }
+.faculty-directory { min-width: 0; }
+.faculty-roster-scroll { max-height: 65vh; overflow: auto; border: 1px solid var(--line); }
+.faculty-roster { width: 100%; margin: 0; }
+.faculty-roster th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.faculty-roster td { vertical-align: middle; padding: 6px; }
+.faculty-roster td:first-child { width: 100%; }
+.faculty-roster .selected { background: #fdf3ea; }
+.faculty-roster .selected .person { color: var(--orange); font-weight: 700; }
+.faculty-roster select { min-width: 68px; }
+.faculty-roster input[type="checkbox"] { accent-color: var(--orange); }
+.faculty-profile-empty, .past-professors { padding: 16px; border: 1px solid var(--line); background: var(--panel); }
+.faculty-profile-empty h2, .past-professors h2 { margin-top: 0; }
 .person {
-    background: #fff;
+    background: transparent;
     color: var(--ink);
     border: 1px solid transparent;
     text-align: left;
     font-weight: normal;
     display: flex;
     justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 5px;
+    overflow-wrap: anywhere;
 }
+.person:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
 .person:hover { background: var(--panel); }
 .person.on { border-color: var(--orange); background: #fdf3ea; }
 .tags { color: var(--faint); display: flex; gap: 4px; }
@@ -337,8 +358,12 @@ table.grid tbody tr:nth-child(even) { background: transparent; }
 .complaint .small, button.small { padding: 0 6px; font-size: 11px; margin-left: 6px; }
 .add { display: flex; gap: 6px; margin-top: 6px; }
 
-@media (max-width: 760px) {
+@media (max-width: 1000px) {
     .faculty { grid-template-columns: 1fr; }
+    .faculty-roster-scroll { max-height: 45vh; }
+}
+@media (max-width: 760px) {
+    .faculty-toolbar input { width: 100%; min-width: 0; }
     .profile .form { grid-template-columns: 1fr; }
 }
 

@@ -6,93 +6,108 @@
 
 <h1>Faculty</h1>
 
-@if (Planning.Faculty.All.Any())
-{
-    <details class="tracklist" open="@_trackListOpen">
-        <summary @onclick="() => _trackListOpen = !_trackListOpen">Track list: tenure (T) or professional (P), and difficult (D)</summary>
-        <p class="hint">Check T or P to assign a track; uncheck it to remove the assignment. Uncheck D to remove difficult priority. Click Save faculty tracks to confirm your selections. Rebuild the schedule to apply changes.</p>
-        <FacultyTrackSave Disabled="_busy" OnSaved="() => _trackChanged = Planning.RequiresRebuild" />
-        @if (_trackChanged)
-        {
-            <div class="problems rebuild">
-                Changed. Rebuild the schedule to apply.
-                @if (Planning.LatestPlan != null)
-                {
-                    <button @onclick="RebuildAndShow" disabled="@_busy">@(_busy ? "Working" : "Rebuild now")</button>
-                }
-            </div>
-        }
-        <table class="plan-table tracktable">
-            <thead><tr><th>Instructor</th><th>T</th><th>P</th><th>D</th></tr></thead>
-            <tbody>
-                @foreach (var f in Planning.Faculty.All)
-                {
-                    <tr>
-                        <td>@f.DisplayName</td>
-                        <td><input type="checkbox" checked="@(f.Track == FacultyTrack.Tenure)"
-                                   @onchange="e => SetTrack(f, (bool)e.Value! ? FacultyTrack.Tenure : FacultyTrack.Unknown)" title="Tenure track: uncheck to remove" aria-label="@($"Tenure track for {f.DisplayName}")" /></td>
-                        <td><input type="checkbox" checked="@(f.Track == FacultyTrack.Professional)"
-                                   @onchange="e => SetTrack(f, (bool)e.Value! ? FacultyTrack.Professional : FacultyTrack.Unknown)" title="Professional track: uncheck to remove" aria-label="@($"Professional track for {f.DisplayName}")" /></td>
-                        <td><input type="checkbox" checked="@f.Difficult"
-                                   @onchange="e => SetDifficult(f, (bool)e.Value!)" title="Difficult: scheduled first" /></td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </details>
-}
+<p class="hint">Manage tracks and scheduling priority in one roster. Select a professor for availability, accommodations, and notes.</p>
+
+<div class="faculty-toolbar">
+    <div class="faculty-views" role="group" aria-label="Professor list">
+        <button class="@(!_showPast ? "on" : "ghost")" aria-pressed="@(!_showPast ? "true" : "false")" @onclick="() => ShowPast(false)">Current professors (@Planning.Faculty.All.Count())</button>
+        <button class="@(_showPast ? "on" : "ghost")" aria-pressed="@(_showPast ? "true" : "false")" @onclick="() => ShowPast(true)">Past professors (@Planning.Faculty.RemovedProfiles.Count())</button>
+    </div>
+    <input type="search" aria-label="Search professors" placeholder="Search professors" @bind="_search" @bind:event="oninput" />
+</div>
 
 @if (_removalMessage != null)
 {
-    <p role="status">@_removalMessage</p>
-    @if (Planning.RequiresRebuild)
-    {
-        <button class="ghost" @onclick="RebuildAndShow" disabled="@_busy">Rebuild schedule</button>
-    }
-}
-
-@if (Planning.Faculty.RemovedProfiles.Any())
-{
-    <details class="tracklist">
-        <summary>Removed professors (@Planning.Faculty.RemovedProfiles.Count())</summary>
-        <p class="hint">Add a professor back to include their classes and discussions in the next build. Deleted notes, accommodations, and complaints are not recovered. Track and priority can be imported again from your files.</p>
-        <table class="plan-table">
-            <thead><tr><th>Professor</th><th>Action</th></tr></thead>
-            <tbody>
-                @foreach (var professor in Planning.Faculty.RemovedProfiles)
-                {
-                    <tr @key="professor.Surname">
-                        <td>@(string.IsNullOrWhiteSpace(professor.DisplayName) ? professor.Surname : professor.DisplayName)</td>
-                        <td><button class="ghost small" disabled="@_busy" aria-label="@($"Add back {professor.Surname}")" @onclick="() => AddProfessorBack(professor.Surname)">Add back</button></td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </details>
+    <p class="faculty-status" role="status">@_removalMessage</p>
 }
 @if (_restoreError != null) { <p role="alert">@_restoreError</p> }
+@if (_directoryError != null) { <p role="alert">@_directoryError</p> }
+@if (Planning.RequiresRebuild)
+{
+    <div class="problems rebuild">
+        Faculty changes are saved. Rebuild the schedule to apply them.
+        <button @onclick="RebuildAndShow" disabled="@_busy">@(_busy ? "Working" : "Rebuild schedule")</button>
+    </div>
+}
 
-<div class="faculty">
-    <div class="list">
-        <input placeholder="search" @bind="_search" @bind:event="oninput" />
-        @foreach (var p in Planning.Faculty.All.Where(p => _search.Length == 0 ||
-                     p.DisplayName.Contains(_search, StringComparison.OrdinalIgnoreCase)))
+@if (_showPast)
+{
+    <section class="past-professors" aria-labelledby="past-professors-title">
+        <h2 id="past-professors-title">Past professors</h2>
+        <p>Professors removed from scheduling stay here so you can add them back at any time.</p>
+        <p class="hint">Adding someone back makes their classes eligible for the next build. Previously deleted notes, accommodations, and complaints are not recovered.</p>
+        @if (!Planning.Faculty.RemovedProfiles.Any())
         {
-            <button class="@(_selected == p ? "person on" : "person")" @onclick="() => Select(p)">
-                @p.DisplayName
-                <span class="tags">
-                    @if (p.Difficult) { <span class="tag d">D</span> }
-                    @(p.Track == FacultyTrack.Tenure ? "T" : p.Track == FacultyTrack.Professional ? "P" : "")
-                    @if (p.HasAccommodations) { <span class="tag">acc</span> }
-                    @if (p.Complaints.Count > 0) { <span class="tag">@p.Complaints.Count</span> }
-                </span>
-            </button>
+            <p class="empty">No past professors. Professors you remove will appear here with an Add back option.</p>
         }
+        else if (!PastProfessors.Any())
+        {
+            <p class="empty">No past professors match “@_search”.</p>
+        }
+        else
+        {
+            <table class="plan-table">
+                <thead><tr><th scope="col">Professor</th><th scope="col">Action</th></tr></thead>
+                <tbody>
+                    @foreach (var professor in PastProfessors)
+                    {
+                        <tr @key="professor.Surname">
+                            <td>@ProfessorName(professor)</td>
+                            <td><button class="ghost" disabled="@_busy" aria-label="@($"Add back {ProfessorName(professor)}")" @onclick="() => AddProfessorBack(professor.Surname)">Add back</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+else
+{
+<div class="faculty">
+    <section class="faculty-directory" aria-label="Current professors">
+        <p class="hint">Track: T = tenure, P = professional. Difficult (D) gives scheduling priority.</p>
         @if (!Planning.Faculty.All.Any())
         {
-            <p class="empty">No profiles yet. Build a schedule on the Semester plan page first.</p>
+            <p class="empty">No current profiles. Build a schedule on Semester plan, or add someone back from Past professors.</p>
         }
-    </div>
+        else if (!CurrentProfessors.Any())
+        {
+            <p class="empty">No current professors match “@_search”.</p>
+        }
+        else
+        {
+            <div class="faculty-roster-scroll">
+                <table class="faculty-roster">
+                    <thead><tr><th scope="col">Professor / profile</th><th scope="col">Track</th><th scope="col">D</th></tr></thead>
+                    <tbody>
+                        @foreach (var professor in CurrentProfessors)
+                        {
+                            <tr @key="professor.Surname" class="@(_selected == professor ? "selected" : "")">
+                                <td>
+                                    <button class="person" aria-pressed="@(_selected == professor ? "true" : "false")" @onclick="() => Select(professor)">
+                                        <span>@ProfessorName(professor)</span>
+                                        <span class="tags">
+                                            @if (professor.HasAccommodations) { <span class="tag" title="Has accommodations">acc</span> }
+                                            @if (professor.Complaints.Count > 0) { <span class="tag" title="Complaints">@professor.Complaints.Count</span> }
+                                        </span>
+                                    </button>
+                                </td>
+                                <td>
+                                    <select value="@professor.Track" disabled="@_busy" aria-label="@($"Track for {ProfessorName(professor)}")" @onchange="e => SetTrack(professor, Enum.Parse<FacultyTrack>(e.Value!.ToString()!))">
+                                        <option value="@FacultyTrack.Unknown">None</option>
+                                        <option value="@FacultyTrack.Tenure">T</option>
+                                        <option value="@FacultyTrack.Professional">P</option>
+                                    </select>
+                                </td>
+                                <td><input type="checkbox" checked="@professor.Difficult" disabled="@_busy" aria-label="@($"Difficult priority for {ProfessorName(professor)}")" @onchange="e => SetDifficult(professor, (bool)e.Value!)" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <FacultyTrackSave Disabled="_busy" OnSaved="() => { _directoryError = null; }" />
+        }
+    </section>
 
     @if (_selected != null)
     {
@@ -101,18 +116,6 @@
             <h2>@p.DisplayName</h2>
 
             <div class="form">
-                <label>Priority</label>
-                <div>
-                    <label class="inline"><input type="checkbox" @bind="p.Difficult" @bind:after="() => p.SetDifficult(p.Difficult)" /> Difficult (D): schedule first</label>
-                </div>
-
-                <label for="track">Track</label>
-                <select id="track" @bind="p.Track" @bind:after="() => p.SetTrack(p.Track)">
-                    <option value="@FacultyTrack.Unknown">None / unassigned</option>
-                    <option value="@FacultyTrack.Tenure">Tenure / tenure track (T)</option>
-                    <option value="@FacultyTrack.Professional">Professional track (P)</option>
-                </select>
-
                 <label for="unav">Unavailable</label>
                 <div>
                     <input id="unav" class="wide" placeholder="e.g. TTH 8:00-9:30; F 1:00-5:00" @bind="p.Unavailable" @bind:event="oninput" />
@@ -180,7 +183,7 @@
                 <summary>Remove professor permanently</summary>
                 <p>This deletes @p.DisplayName’s saved profile, track, priority, notes, accommodations, and complaints from this browser. Future uploads will not restore the profile.</p>
                 <p>Their classes and discussions will also be excluded from future schedules.</p>
-                <p class="hint">The current plan stays visible until you rebuild. Uploaded source files are kept. You can add them back from Removed professors, but deleted profile details will not be recovered.</p>
+                <p class="hint">The current plan stays visible until you rebuild. Uploaded source files are kept. You can add them back from Past professors, but deleted profile details will not be recovered.</p>
                 <label class="inline"><input type="checkbox" @bind="_confirmRemoval" /> I want to permanently remove @p.DisplayName</label>
                 <button class="ghost" @onclick="RemoveProfessor" disabled="@(_busy || !_confirmRemoval)">Permanently remove professor</button>
                 @if (_removalError != null) { <p role="alert">@_removalError</p> }
@@ -208,13 +211,35 @@
             }
         </div>
     }
+    else
+    {
+        <div class="faculty-profile-empty">
+            <h2>Professor details</h2>
+            <p>Select a name in the roster to edit availability, accommodations, notes, or complaints.</p>
+            <p class="hint">Track and priority are edited directly in the roster. To restore someone who was removed, open Past professors.</p>
+        </div>
+    }
 </div>
+}
 
 @code {
     private string _search = "";
     private FacultyProfile? _selected;
     private string _newComplaint = "";
     private bool _saved;
+    private bool _showPast;
+    private string? _directoryError;
+    private IEnumerable<FacultyProfile> CurrentProfessors => Planning.Faculty.All.Where(MatchesSearch);
+    private IEnumerable<FacultyProfile> PastProfessors => Planning.Faculty.RemovedProfiles.Where(MatchesSearch);
+    private static string ProfessorName(FacultyProfile profile) => string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.Surname : profile.DisplayName;
+    private bool MatchesSearch(FacultyProfile profile) => ProfessorName(profile).Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) || profile.Surname.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private void ShowPast(bool past)
+    {
+        _showPast = past;
+        _search = "";
+        _restoreError = null;
+    }
     private bool _confirmRemoval;
     private string? _removalMessage, _removalError, _restoreError;
 
@@ -226,7 +251,7 @@
             var profile = Planning.Faculty.AddBack(surname);
             Select(profile);
             _search = "";
-            _trackChanged = Planning.RequiresRebuild;
+            _showPast = false;
             _removalMessage = $"{profile.DisplayName} was added back. Rebuild the schedule to include their classes and discussions from the current files. Deleted profile details have not been recovered.";
         }
         catch (InvalidOperationException ex) { _restoreError = ex.Message; }
@@ -241,8 +266,8 @@
         {
             Planning.Faculty.RemovePermanently(_selected.Surname);
             _selected = null; _saved = false; _confirmRemoval = false; _newComplaint = "";
-            _trackChanged = Planning.RequiresRebuild;
-            _removalMessage = $"{name} was permanently removed from saved faculty in this browser. Their classes and discussions will be excluded when you rebuild.";
+            _showPast = true; _search = "";
+            _removalMessage = $"{name} was removed. You can add them back below from Past professors. Rebuild to exclude their classes and discussions.";
         }
         catch (InvalidOperationException ex) { _removalError = ex.Message; }
         catch (ArgumentException ex) { _removalError = ex.Message; }
@@ -264,21 +289,24 @@
     }
 
     private bool _busy;
-    private bool _trackListOpen = true;
-    private bool _trackChanged;
 
-    private void SetTrack(FacultyProfile f, FacultyTrack track)
+    private void SetTrack(FacultyProfile profile, FacultyTrack track)
     {
-        f.SetTrack(track);
-        Planning.Faculty.Save();
-        _trackChanged = true;
+        profile.SetTrack(track);
+        SaveDirectory();
     }
 
-    private void SetDifficult(FacultyProfile f, bool difficult)
+    private void SetDifficult(FacultyProfile profile, bool difficult)
     {
-        f.SetDifficult(difficult);
-        Planning.Faculty.Save();
-        _trackChanged = true;
+        profile.SetDifficult(difficult);
+        SaveDirectory();
+    }
+
+    private void SaveDirectory()
+    {
+        _directoryError = null;
+        try { Planning.Faculty.Save(); }
+        catch (InvalidOperationException ex) { _directoryError = $"Could not save faculty changes: {ex.Message} Use Save faculty tracks to retry."; }
     }
 
     /// <summary>Reruns the last schedule with the saved profiles, then shows it.</summary>
