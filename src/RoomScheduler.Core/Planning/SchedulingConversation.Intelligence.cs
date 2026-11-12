@@ -9,6 +9,9 @@ public sealed partial class SchedulingConversation
 {
     private string _availabilityDetails = "";
 
+    // An unqualified seat count means the room must hold at least that many people.
+    private const string SeatBoundPattern = @"\b(?:(at least|at most|no more than|no less than|minimum of|maximum of|under|over|less than|fewer than|more than|exactly)\s+)?(\d+)\s*(?:seats?|people|students?)\b";
+
     private static List<Room> MentionedRooms(string text, IReadOnlyList<Room> rooms) => rooms
         .Where(r => Regex.IsMatch(text, $@"\b{Regex.Escape(r.DisplayName)}\b", Ignore)).ToList();
 
@@ -17,18 +20,22 @@ public sealed partial class SchedulingConversation
 
     private static bool ReadSeatBounds(string text, SearchFilters filters)
     {
-        var matches = Regex.Matches(text,
-            @"\b(at least|at most|no more than|no less than|minimum of|maximum of|under|over|less than|fewer than|more than)\s+(\d+)\s*(?:seats?|people|students?)\b", Ignore);
+        var matches = Regex.Matches(text, SeatBoundPattern, Ignore);
         if (matches.Count > 0) filters.Error = null;
         foreach (Match match in matches)
         {
             if (!int.TryParse(match.Groups[2].Value, out int seats))
             { filters.Error = "That seat count is too large. Give me a seat count within the room inventory's range."; continue; }
             string bound = match.Groups[1].Value.ToLowerInvariant();
-            if (bound is "at least" or "no less than" or "minimum of") filters.MinSeats = seats;
+            if (bound == "exactly") filters.MinSeats = filters.MaxSeats = seats;
+            else if (bound is "" or "at least" or "no less than" or "minimum of") filters.MinSeats = seats;
             else if (bound is "over" or "more than") filters.MinSeats = (long)seats + 1;
             else filters.MaxSeats = bound is "under" or "less than" or "fewer than" ? (long)seats - 1 : seats;
         }
+        if (Regex.IsMatch(text, @"\b(?:about|around|roughly|approximately)\s+\d+\s*(?:seats?|people|students?)\b", Ignore))
+            filters.Error = "Should that seat count be a minimum, an exact capacity, or a range? For example, ‘at least 80 seats’ or ‘between 70 and 90 seats’.";
+        if (Regex.IsMatch(text, @"(?:-\s*\d+|\d+\.\d+)\s*(?:seats?|people|students?)\b", Ignore))
+            filters.Error = "Please give a whole, nonnegative seat count.";
         return matches.Count > 0;
     }
 

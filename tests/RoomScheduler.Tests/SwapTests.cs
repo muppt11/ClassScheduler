@@ -246,4 +246,38 @@ public partial class SwapTests
         Assert.Same(preview, f.Chat.Proposal);
     }
 
+    [Theory]
+    [InlineData("can you give room swap options that would have 80 seats for comp arch?", 80)]
+    [InlineData("find room and time swaps for comp arch with 80 seats", 80)]
+    [InlineData("find room swaps for comp arch with exactly 80 seats", 80)]
+    [InlineData("find room swaps for comp arch with at least 80 seats", 80)]
+    [InlineData("find room swaps for comp arch with under 80 seats", 70)]
+    public void Swap_options_enforce_requested_seat_counts(string request, int expectedCapacity)
+    {
+        var f = Fixture(true);
+        f.Rooms[0].Capacity = 60; f.Rooms[1].Capacity = 80; f.Rooms[2].Capacity = 70;
+        foreach (var p in f.Plan.Placements) p.Section.SizeForRoom = 50;
+        Send(f, "find room and time swaps for comp arch");
+        Send(f, request);
+        Assert.True(f.Chat.Proposal != null, Last(f.Chat));
+        Assert.Equal(expectedCapacity, f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement == f.Plan.Placements[0]).Room.Capacity);
+        Assert.Single(f.Chat.Suggestions, s => s.StartsWith("Swap with"));
+        Assert.Equal(f.Rooms[0], f.Plan.Placements[0].Room);
+    }
+
+    [Fact]
+    public void Unavailable_seat_count_clears_preview_and_survives_swap_mode_changes()
+    {
+        var f = Fixture(true);
+        Send(f, "find room swaps for comp arch");
+        Assert.NotNull(f.Chat.Proposal);
+        Send(f, "80 seats");
+        Assert.Null(f.Chat.Proposal);
+        Assert.Contains("at least 80 seats", Last(f.Chat));
+        Send(f, "Find room and time swaps");
+        Assert.Null(f.Chat.Proposal);
+        Assert.Contains("at least 80 seats", Last(f.Chat));
+        Assert.DoesNotContain(f.Chat.Suggestions, s => s.StartsWith("Swap with"));
+    }
+
 }

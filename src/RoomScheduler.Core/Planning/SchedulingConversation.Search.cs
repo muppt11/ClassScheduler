@@ -89,6 +89,8 @@ public sealed partial class SchedulingConversation
     private static string Normalize(string text)
     {
         text = text.Replace('’', '\'');
+        text = NormalizeCapacityLanguage(text);
+        text = NormalizeRequestLanguage(text);
         text = Regex.Replace(text, @"\b(?:macnhge|chnage|chagne|cahnge)\b", "change", Ignore);
         text = Regex.Replace(text, @"\btimings\b", "times", Ignore);
         text = Regex.Replace(text, @"\b(one|single|two|three|four|five|[0-9]+)[- ]?days?\b", "$1 day", Ignore);
@@ -110,7 +112,7 @@ public sealed partial class SchedulingConversation
         return text;
     }
 
-    private static bool WantsRoomSearch(string text) => Regex.IsMatch(text,
+    private static bool WantsRoomSearch(string text) => Regex.IsMatch(text, SeatBoundPattern, Ignore) || Regex.IsMatch(text,
         @"\b(?:smallest|smaller|bigger|larger|unused|free|available|unoccupied)\s+(?:class)?room\b|\broom\s+(?:(?:that|which)\s+)?(?:is|that's)\s+(?:smaller|bigger|larger|unused|too (?:large|big|small))\b|\b(?:under|over|at most|at least|no more than|no less than|less than|fewer than|more than|maximum of|minimum of)\s+\d+\s*(?:seats?|people|students?)\b|\b(?:has not|hasn't|not) been used\b|\b(?:smallest|fewest disruptions|fewest changes)\b", Ignore);
 
     private static bool WantsOptions(string text) => Regex.IsMatch(text,
@@ -118,7 +120,10 @@ public sealed partial class SchedulingConversation
 
     private static int OptionNumber(string text)
     {
-        var number = Regex.Match(text.Trim(), @"^(?:(?:choose|show|try|use|select|pick|option|number)\s+)*(?:(\d+)|(?:the\s+)?(first|second|third))(?:\s+(?:one|option))?[.!]?$", Ignore);
+        text = Regex.Replace(text.Trim(), @"^(?:(?:can|could|would) you\s+|please\s+|let's\s+|go with\s+)+", "", Ignore);
+        text = Regex.Replace(text, @"\s+please[.!?]?$", "", Ignore);
+        text = Regex.Replace(text, @"\bshow me\b", "show", Ignore);
+        var number = Regex.Match(text.Trim(), @"^(?:(?:choose|show|try|use|select|pick|option|number)\s+)*(?:(\d+)|(?:the\s+)?(first|second|third))(?:\s+(?:one|option))?[.!?]?$", Ignore);
         if (!number.Success) return -1;
         if (number.Groups[1].Success)
         {
@@ -202,6 +207,8 @@ public sealed partial class SchedulingConversation
         }
         if (Regex.IsMatch(text, @"\b(any size|remove (?:the )?seat limits?|no seat limit)\b", Ignore))
         { _filters.MinSeats = _filters.MaxSeats = null; _filters.Error = null; _filters.RoomSize = 0; _findRoom = true; }
+        if (Regex.IsMatch(text, SeatBoundPattern, Ignore) && Regex.IsMatch(text, @"\b(actually|instead|I meant|change (?:it|that) to|make (?:it|that))\b", Ignore))
+            _filters.MinSeats = _filters.MaxSeats = null;
         if (ReadSeatBounds(text, _filters)) _findRoom = true;
         if (Regex.IsMatch(text, @"\bsmallest\b", Ignore)) { _filters.PreferSmallest = true; _findRoom = true; }
         if (Regex.IsMatch(text, @"\b(?:fewest disruptions|fewest changes|least disruption)\b", Ignore)) _filters.PreferSmallest = false;
@@ -213,7 +220,15 @@ public sealed partial class SchedulingConversation
         if (Regex.IsMatch(text, @"\b(with (?:recording|lecture capture)|needs? (?:recording|lecture capture))\b", Ignore))
         { _filters.Recording = true; _findRoom = true; }
         if (Regex.IsMatch(text, @"\b(?:same|current|existing) (?:meeting )?time\b|\bkeep (?:its |the )?time\b", Ignore))
-        { _filters.SameTime = true; _filters.Direction = 0; _time = _target?.Time; _timeExplicit = false; _findSlot = false; _findRoom = true; }
+        {
+            _filters.SameTime = true; _filters.Direction = 0; _time = _target?.Time; _timeExplicit = false; _findSlot = false; _findRoom = true;
+            if (_swapRequested) { _swapTimes = false; _swapTimesExplicit = true; }
+        }
+        if (Regex.IsMatch(text, @"\ballow changing time\b", Ignore))
+        {
+            _filters.SameTime = false; _time = null; _timeExplicit = false; _findSlot = true;
+            if (_swapRequested) { _swapTimes = true; _swapTimesExplicit = true; }
+        }
         if (Regex.IsMatch(text, @"\b(?:same|current|existing) room\b", Ignore))
         { _filters.SameRoom = true; _room = _target?.Room; _roomExplicit = false; }
         if (Regex.IsMatch(text, @"\b(?:without (?:moving|displacing)|don'?t (?:move|displace)) (?:any |the )?other (?:classes|sections|courses)\b", Ignore)) _filters.NoDisplacement = true;

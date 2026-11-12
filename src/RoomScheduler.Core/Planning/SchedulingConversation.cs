@@ -92,7 +92,7 @@ public sealed partial class SchedulingConversation
     {
         Sync(plan);
         var previousPreview = Proposal?.ProposedChanges.FirstOrDefault(c => c.Placement == _target);
-        string text = Normalize(message.Trim());
+        string text = ExpandCapacityFollowup(Normalize(message.Trim()));
         if (text.Length == 0) return;
         Messages.Add(new(true, message.Trim()));
         if (Regex.IsMatch(text, @"^(cancel|never mind|nevermind|forget (it|that)|start over|reset request)[.!]?$", Ignore)) { Cancel(); return; }
@@ -165,10 +165,14 @@ public sealed partial class SchedulingConversation
         if (swap)
         {
             var contextPair = Regex.Match(text, @"^(?:swap|exchange|trade)\s+with\s+(.+?)[.!?]?$", Ignore);
-            var pair = Regex.Match(text, @"\b(?:swap|exchange|trade)\s+(?:the\s+)?(?:(?:rooms?|slots?|times?)(?:\s+and\s+(?:rooms?|times?))?\s+)?(?:(?:for|between|of)\s+)?(.+?)\s+(?:with|and)\s+(.+?)[.!?]?$", Ignore);
-            if (pair.Success && !Regex.IsMatch(text, @"^find room and time swaps", Ignore))
+            string pairText = Regex.Replace(text, @"\([^()]*\)", m => Regex.Replace(m.Value, @"\b(?:with|and)\b", word => new string(' ', word.Length), Ignore));
+            pairText = Regex.Replace(pairText, "(" + ReferenceDay + @"\s+)(and)(?=\s+" + ReferenceDay + ")", m => m.Groups[1].Value + new string(' ', m.Groups[2].Length), Ignore);
+            var pair = Regex.Match(pairText, @"\b(?:swap|exchange|trade)\s+(?:the\s+)?(?:(?:rooms?|slots?|times?)(?:\s+and\s+(?:rooms?|times?))?\s+)?(?:(?:for|between|of)\s+)?(.+?)\s+(?:with|and)\s+(.+?)[.!?]?$", Ignore);
+            if (pair.Success && !Regex.IsMatch(text, @"^find room and time swaps", Ignore) &&
+                (!Regex.IsMatch(pair.Groups[2].Value, SeatBoundPattern, Ignore) || FindCourses(pair.Groups[2].Value).Count > 0))
             {
-                courseText = pair.Groups[1].Value; partnerQuery = pair.Groups[2].Value;
+                courseText = text.Substring(pair.Groups[1].Index, pair.Groups[1].Length);
+                partnerQuery = text.Substring(pair.Groups[2].Index, pair.Groups[2].Length);
             }
             else if (contextPair.Success) { courseText = "it"; partnerQuery = contextPair.Groups[1].Value; }
         }
@@ -180,7 +184,18 @@ public sealed partial class SchedulingConversation
         if (!followup && (move || IsRefinement(text) || Regex.IsMatch(text, @"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(after|before|later|earlier|same|keep|anywhere|only|no Friday)\b", Ignore) || MatchRoom(text, rooms).Mentioned))
         { Proposal = null; _moveOptions.Clear(); _swapOptions.Clear(); }
         // A new move starts fresh; replies such as ‘actually use GDC 2.216’ refine the pending move.
-        var matches = FindCourses(courseText);
+        bool identifyingSection = swap || _awaiting == "course" && _candidates.Count > 1;
+        var matches = FindCourses(courseText, identifyingSection);
+        var sectionReference = ReadSectionReference(courseText, identifyingSection, out string courseIdentity);
+        string requestDetails = RemoveSectionReferences(text, courseText, partnerQuery, identifyingSection);
+        if (sectionReference != null && matches.Count == 0 && FindCoursesByName(courseIdentity).Count > 0)
+        {
+            var existing = FindCoursesByName(courseIdentity);
+            ClearRequest();
+            Reply("No section matches that course and current meeting time. Current sections: " +
+                string.Join("; ", existing.Select(p => $"{Description(p)} — {p.Time?.ToString() ?? "unassigned"}")) + ". No changes were made.");
+            return;
+        }
         if (_awaiting == "spelling")
         {
             var selected = SelectCandidate(text, _candidates);
@@ -214,8 +229,8 @@ public sealed partial class SchedulingConversation
         { if (_target != null && _target != _lastTarget) ClearRequest(); _target = _lastTarget; }
         if (partnerQuery != null || move && matches.Count > 0 && (matches.Count > 1 || _target == null || !matches.Contains(_target)))
             ClearRequest();
-        bool refiningSwap = _swapRequested && !swap && matches.Count == 0 && IsRefinement(text) &&
-            !Regex.IsMatch(text, @"\b(move|put|find|reschedule|relocate|shift|change|adjust)\b", Ignore);
+        bool refiningSwap = _swapRequested && !swap && (matches.Count == 0 || matches.Count == 1 && matches[0] == _target) && IsRefinement(text) &&
+            !Regex.IsMatch(text, @"\b(move|put|reschedule|relocate|shift)\b|\bfind (?:a |an )?(?:free|available) (?:slot|time)\b", Ignore);
         if (swap)
         {
             _swapRequested = true;
@@ -269,7 +284,7 @@ public sealed partial class SchedulingConversation
             else if (_candidates.Count > 1)
             {
                 _awaiting = "course";
-                if (_pendingDetails.Length == 0) _pendingDetails = text;
+                if (_pendingDetails.Length == 0) _pendingDetails = requestDetails;
                 Reply("I found more than one matching section. Which one do you mean? Reply with the instructor, row number, or one of these choices.",
                     _candidates.Select(Description).ToArray()); return;
             }
@@ -282,7 +297,7 @@ public sealed partial class SchedulingConversation
         _referencedCourses = new() { _target };
         if (_target.Section.Online) { Reply($"{_target.Section.Title} is marked online, so it has no physical classroom. Change its modality before assigning a room."); return; }
 
-        string details = _pendingDetails.Length > 0 ? _pendingDetails + " " + text : text;
+        string details = _pendingDetails.Length > 0 ? _pendingDetails + " " + requestDetails : requestDetails;
         _pendingDetails = "";
         if (Regex.IsMatch(details, @"\b(?:find|suggest|recommend|look for)\b.*\b(?:slot|time)\b", Ignore))
             _findSlot = true;
@@ -374,9 +389,9 @@ public sealed partial class SchedulingConversation
             _swapTimes = (_gdcHours && _target.Time.Start < _plan!.Rules.CsOwnsGdcFrom) || (_time != null && !Equals(_time, _target.Time)) || _findSlot;
         if (_swapPartnerQuery.Length > 0)
         {
-            _partners = FindCourses(_swapPartnerQuery).Where(p => p != _target).ToList();
+            _partners = FindCourses(_swapPartnerQuery, true).Where(p => p != _target).ToList();
             if (_partners.Count == 0)
-            { Reply("Which other course should swap with " + _target.Section.Title + "? I couldn't match the second course in this schedule.", "Find room swaps", "Find room and time swaps", "Cancel"); return; }
+            { Reply("I couldn't match the other course and any supplied current meeting days/time in this schedule. Check its course number and meeting time. No changes were made.", "Find room swaps", "Find room and time swaps", "Cancel"); return; }
             if (_partners.Count == 1) _swapPartnerQuery = "";
             if (_partners.Count > 1)
             {
@@ -426,7 +441,7 @@ public sealed partial class SchedulingConversation
                 _swapOptions.Select(o => o.Label).Append("Find room and time swaps").Append("Cancel").ToArray()); return;
         }
         string scope = _swapTimes ? "room-and-time" : "room-only";
-        Reply($"I couldn't find a feasible {scope} swap matching the current request for {_target.Section.Title}. " +
+        Reply($"I couldn't find a feasible {scope} swap matching the current request for {_target.Section.Title}.{_filters.Describe()} " +
             (error ?? "No eligible partner meets the requested room/time and CS-hours conditions.") +
             " No changes were made. You can broaden the search or specify the other course.",
             _swapTimes ? "Find room swaps" : "Find room and time swaps", "Find a free slot", "Cancel");
@@ -485,10 +500,10 @@ public sealed partial class SchedulingConversation
         return false;
     }
 
-    private List<Placement> FindCourses(string text)
+    private List<Placement> FindCoursesByName(string text)
     {
         string clean = Regex.Replace(text, @"\b[A-Za-z]{2,5}\s+\d+\.\d+\b", " ");
-        clean = Regex.Replace(clean, @"\b(?:at least|at most|no more than|no less than|under|over|less than|fewer than|more than|minimum of|maximum of)\s+\d+\s*(?:seats?|people|students?)\b", " ", Ignore);
+        clean = Regex.Replace(clean, SeatBoundPattern, " ", Ignore);
         var rowMatch = Regex.Match(clean, @"\brow\s+(\d+)\b", Ignore);
         if (rowMatch.Success)
             return int.TryParse(rowMatch.Groups[1].Value, out int row) ? _plan!.Placements.Where(p => p.Section.SourceRow + 1 == row).ToList() : new();
@@ -514,6 +529,19 @@ public sealed partial class SchedulingConversation
 
     private static Placement? SelectCandidate(string text, List<Placement> choices)
     {
+        var reference = ReadSectionReference(text, true, out _);
+        if (reference != null)
+        {
+            var timed = choices.Where(reference.Matches).ToList();
+            if (timed.Count != 1) return null;
+            choices = timed;
+            if (Regex.IsMatch(text, @"\brow\s+\d+\b", Ignore))
+            {
+                var row = Regex.Match(text, @"\brow\s+(\d+)\b", Ignore);
+                return int.TryParse(row.Groups[1].Value, out int sourceRow) && choices[0].Section.SourceRow + 1 == sourceRow ? choices[0] : null;
+            }
+            return choices[0];
+        }
         int ordinal = OptionNumber(text);
         if (ordinal >= 0 && ordinal < choices.Count) return choices[ordinal];
         var index = Regex.Match(text.Trim(), @"^(?:option |number )?(\d+)[.)]?$", Ignore);

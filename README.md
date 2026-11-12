@@ -381,6 +381,24 @@ other room/instructor bookings. Infeasible swaps leave the plan unchanged; stale
 at Apply. Search checks at most 80 eligible partners; it does not prove that no larger rearrangement exists.
 Generated moves use typed rooms/meeting times rather than reparsing their day patterns as chat commands.
 
+Identify sections by their current meeting times, for example `swap rooms for CS 312
+(TTH 2-3:30pm) and CS 313E (TTH 2-3:30P)`. The chatbot matches each course's days and
+time independently and goes directly to a preview when each identifies one section. These
+times identify the existing sections; room-only swaps preserve their meeting times. Full
+weekday names, 24-hour times, and a timing-only reply to a section question also work.
+If multiple sections of the same course share the supplied time, an instructor or row is
+still needed. A time that matches no current section does not select a different section.
+
+Seat requests such as `80 seats` mean at least 80 physical room seats; use `exactly 80 seats`
+for an exact capacity or `under 80 seats` for a strict upper limit. These conditions stay active
+when switching between room-only and room-and-time swap searches. If no feasible swap meets
+the seat requirement, the chatbot clears the previous preview instead of offering a smaller room.
+You can also say `a room that holds seventy people`, `120-seat room`, `up to 150 seats`,
+or `between sixty-five and seventy-five students`. A follow-up such as `actually make it 100`
+replaces the old seat requirement while keeping the course and swap type. Say `don't change
+the time` to keep meeting times, or `the time is flexible` to explore room-and-time swaps.
+Requests such as `around 80 seats` ask you to clarify a minimum, exact count, or range.
+
 ## Known gaps
 
 - **Discussion sections** are phase two, after the lecture schedule is approved. The code is
