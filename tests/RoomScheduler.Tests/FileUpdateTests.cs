@@ -16,6 +16,51 @@ public partial class FileUploadTests
 
     private static string LastChat(PlanningSession session) => session.Conversation.Messages.Last().Text;
 
+    [Theory]
+    [InlineData("Review file updates")]
+    [InlineData("use the newest files")]
+    [InlineData("rebuild with the latest uploaded files")]
+    [InlineData("review the new files and rebuild the schedule")]
+    public void Reviewing_or_requesting_new_files_never_rebuilds_before_a_separate_confirmation(string request)
+    {
+        var session = NewSession();
+        session.Save("old.xlsx", RevisedClasses("PTF"), FileKind.Other);
+        var old = session.Build("old.xlsx");
+        var assignments = old.Placements.Select(p => (p.Room, p.Time)).ToList();
+        session.Save("new.xlsx", RevisedClasses("T"), FileKind.Other);
+        session.SendChat(request);
+        Assert.Same(old, session.LatestPlan);
+        Assert.Equal("old.xlsx", session.LatestSource);
+        Assert.Equal(assignments, old.Placements.Select(p => (p.Room, p.Time)).ToList());
+        Assert.Equal(FacultyTrack.Professional, session.Faculty.Find("SMITH")!.Track);
+        Assert.Contains("new.xlsx", LastChat(session));
+        Assert.Contains("Nothing has been rebuilt yet", LastChat(session));
+        Assert.Contains("Confirm rebuild with newest files", session.Conversation.Suggestions);
+        session.SendChat("Confirm rebuild with newest files");
+        Assert.NotSame(old, session.LatestPlan);
+        Assert.Equal("new.xlsx", session.LatestSource);
+        Assert.Equal(FacultyTrack.Tenure, session.Faculty.Find("SMITH")!.Track);
+        Assert.False(session.RequiresRebuild);
+    }
+
+    [Fact]
+    public void Uploading_and_reviewing_files_does_not_build_an_initial_schedule_without_confirmation()
+    {
+        var session = NewSession();
+        session.Save("new.xlsx", RevisedClasses("PTF"), FileKind.Other);
+        Assert.Null(session.LatestPlan);
+        session.SendChat("Review file updates");
+        Assert.Null(session.LatestPlan);
+        Assert.Contains("Nothing has been rebuilt yet", LastChat(session));
+        session.SendChat("Cancel updates");
+        Assert.Null(session.LatestPlan);
+        session.SendChat("Confirm updates");
+        Assert.Null(session.LatestPlan);
+        session.SendChat("Review file updates");
+        session.SendChat("Confirm updates");
+        Assert.NotNull(session.LatestPlan);
+    }
+
     [Fact]
     public void Newer_faculty_reference_updates_old_imported_values_after_reopening()
     {

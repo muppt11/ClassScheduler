@@ -32,7 +32,7 @@ public partial class SwapTests
         // The singular ‘swap ... with’ must distinguish capacity from a partner course.
         Send(f, "can you swap rooms for comp arch with " + phrase + "?");
         Assert.True(f.Chat.Proposal != null, Last(f.Chat));
-        var options = f.Chat.Suggestions.Where(s => s.StartsWith("Swap with")).ToList();
+        var options = f.Chat.Suggestions.Where(IsRoomOption).ToList();
         Assert.NotEmpty(options);
         foreach (string option in options)
         {
@@ -60,7 +60,7 @@ public partial class SwapTests
         Send(f, $"find room swaps for comp arch with {seats:N0} seats");
         Assert.True(f.Chat.Proposal != null, Last(f.Chat));
         Assert.Equal(seats + 1, f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement == f.Plan.Placements[0]).Room.Capacity);
-        Assert.Single(f.Chat.Suggestions, s => s.StartsWith("Swap with"));
+        Assert.Single(f.Chat.Suggestions, IsRoomOption);
     }
 
     [Theory]
@@ -108,7 +108,7 @@ public partial class SwapTests
         Assert.NotNull(f.Chat.Proposal);
         Send(f, request);
         Assert.Null(f.Chat.Proposal);
-        Assert.DoesNotContain(f.Chat.Suggestions, s => s.StartsWith("Swap with"));
+        Assert.DoesNotContain(f.Chat.Suggestions, IsRoomOption);
         Assert.DoesNotContain("I found", Last(f.Chat));
         Send(f, "actually exactly 40 seats instead");
         Assert.True(f.Chat.Proposal != null, Last(f.Chat));
@@ -135,7 +135,7 @@ public partial class SwapTests
         Assert.NotNull(f.Chat.Proposal);
         Send(f, "don't change the time please");
         Assert.True(f.Chat.Proposal != null, Last(f.Chat));
-        Assert.Contains("room-only swap", Last(f.Chat));
+        Assert.Contains("For this capacity request", Last(f.Chat));
         Assert.All(f.Chat.Proposal!.ProposedChanges, c => Assert.Equal(c.BeforeTime, c.Time));
         Send(f, "the time is flexible");
         Assert.True(f.Chat.Proposal != null, Last(f.Chat));

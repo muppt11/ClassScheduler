@@ -30,9 +30,9 @@ public partial class ConversationTests
         return (new(), planner, plan, rooms);
     }
     private static void Send((SchedulingConversation Chat, Planner Planner, Planner.Plan Plan, List<Room> Rooms) f, string text, bool allow = false) =>
-        f.Chat.Send(f.Plan, f.Rooms, (s, b) => f.Planner.ProposeOverride(f.Plan, s, b), text, allow,
-            (target, room, time, b) => f.Planner.ProposeOverride(f.Plan, target, room, time, b),
-            (first, second, times, b) => f.Planner.ProposeSwap(f.Plan, first, second, times, b));
+        f.Chat.Send(f.Plan, f.Rooms, (s, b, seats) => f.Planner.ProposeOverride(f.Plan, s, b, seats), text, allow,
+            (target, room, time, b, seats) => f.Planner.ProposeOverride(f.Plan, target, room, time, b, seats),
+            (first, second, times, b, seats) => f.Planner.ProposeSwap(f.Plan, first, second, times, b, seats));
     private static string Last(SchedulingConversation chat) => chat.Messages.Last().Text;
 
     [Fact]
@@ -579,13 +579,17 @@ public partial class ConversationTests
     }
 
     [Fact]
-    public void Swap_followup_explains_unused_room_condition_instead_of_dropping_it()
+    public void Capacity_swap_followup_preserves_unused_room_condition_and_finds_a_free_room()
     {
         var f = Fixture(); f.Plan.Placements[0].Room = f.Rooms[0];
         Send(f, "find comp arch an unused room no more than 60 seats");
         Send(f, "can I swap comp arch?");
-        Assert.Null(f.Chat.Proposal);
-        Assert.Contains("unused-room condition is still active", Last(f.Chat));
+        Assert.NotNull(f.Chat.Proposal);
+        var change = Assert.Single(f.Chat.Proposal!.ProposedChanges);
+        Assert.Equal(f.Plan.Placements[0], change.Placement);
+        Assert.Equal(f.Rooms[1], change.Room);
+        Assert.Equal(change.BeforeTime, change.Time);
+        Assert.Contains("no assignments", f.Chat.RequestContext!);
     }
 
     [Fact]

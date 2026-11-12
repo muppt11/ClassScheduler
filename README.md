@@ -266,7 +266,8 @@ Natural requests such as `a room that is smaller` and pasted course/instructor l
 plan, including discussions; it does not claim the room has never been used campus-wide.
 For example: `439H (Elnozahy): find a smaller room, no more than 60 seats, that has not been used`.
 Room-only requests keep the current meeting time, including follow-ups such as `under 50 seats`.
-`Allow used rooms` removes the unused-room restriction; swaps explain when it prevents an exchange.
+`Allow used rooms` removes the unused-room restriction. Capacity-based room searches include free
+rooms; an explicit two-course exchange still requires both courses' current rooms.
 Course selection also supports instructor surnames (`move Elnozahy to Tuesday at 2pm`) and
 source rows (`move row 124 to Tuesday at 2pm`). Exact course numbers take priority over title
 words; conflicting course/instructor selectors require clarification. A close spelling match is
@@ -307,7 +308,8 @@ Availability queries apply building, capacity, lecture-capture and unused-room f
 them while clarifying the interval: `which rooms are free in GDC under 60 seats?`, then
 `Tuesday 2pm-3pm`. These query filters do not change a pending move. Seat ranges such as
 `between 35 and 60 seats` and `60 seats max` work in move and availability requests. A seat-limit
-follow-up to a swap keeps searching swap partners. `Fridays are okay`, `actually in GDC`, and
+follow-up to a room-only swap searches matching free rooms and occupied rooms whose classes can be
+rehoused. A named partner stays a two-course exchange. `Fridays are okay`, `actually in GDC`, and
 `any size` explicitly relax the corresponding day, building, or seat restriction.
 
 Conditions carry into follow-ups and are shown above the message box. `Any room, any time`
@@ -372,8 +374,11 @@ elsewhere in the plan do not prevent a valid room move.
 Apply rechecks the entire proposed schedule and rejects stale previews. No external availability
 feed exists: availability here means the uploaded/planned schedule and configured offline rooms.
 Weekly-hour exceptions and registrar permission before CS-controlled GDC hours still require review.
-A request for a substantially oversized room requires the explicit per-request exception checkbox;
-this can accommodate Computer Architecture or 398T in GDC 2.216 without hard-coded course rules.
+An explicit seat minimum is used to check the requested room fit, without changing the class's
+expected enrollment. For example, a 30-student class can request an 80-seat room. Rooms substantially
+larger than both the enrollment and the requested minimum still require the per-request oversized-room
+exception checkbox. The requested minimum applies only to the target course; a named swap partner
+keeps its own size and fit checks. No course-specific exceptions are hard-coded.
 Approved moves are marked for review and appear in exports. Rebuild/page reload replaces them.
 
 The chatbot also supports `swap rooms for comp arch with data structures` and contextual follow-ups
@@ -397,6 +402,11 @@ Seat requests such as `80 seats` mean at least 80 physical room seats; use `exac
 for an exact capacity or `under 80 seats` for a strict upper limit. These conditions stay active
 when switching between room-only and room-and-time swap searches. If no feasible swap meets
 the seat requirement, the chatbot clears the previous preview instead of offering a smaller room.
+`Find room swaps for 104C with 80–120 seats` searches the whole available room inventory at that
+section's current meeting time, including rooms with no assignments and rooms used only at other
+times. Free rooms are preferred. Occupied rooms are offered only when every displaced class has
+a checked replacement; all moves remain a preview until Apply. A requested capacity never lowers
+the physical capacity needed for the actual class or bypasses offline or accommodation requirements.
 You can also say `a room that holds seventy people`, `120-seat room`, `up to 150 seats`,
 or `between sixty-five and seventy-five students`. A follow-up such as `actually make it 100`
 replaces the old seat requirement while keeping the course and swap type. Say `don't change

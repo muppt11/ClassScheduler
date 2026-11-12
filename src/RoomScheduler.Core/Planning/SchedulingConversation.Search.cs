@@ -13,6 +13,9 @@ public sealed partial class SchedulingConversation
     private int _selectedOption;
     private Room? _availabilityRoom;
     private bool _availabilitySearch;
+    private int? RequestedMinimumSeats => _filters.MinSeats is >= 0 and <= int.MaxValue ? (int?)_filters.MinSeats : null;
+    private int RoomCapacityTarget(Placement target) => Math.Max(target.Section.SizeForRoom,
+        RequestedMinimumSeats ?? target.Section.PreferredRoomCapacity);
     public string? RequestContext => _target == null ? null :
         $"Working with {Description(_target)}. Current assignment: {_target.Room?.DisplayName ?? "no room"}, {_target.Time?.ToString() ?? "no time"}." +
         (_roomExplicit && _room != null ? " Requested room: " + _room.DisplayName + "." : "") +
@@ -282,8 +285,8 @@ public sealed partial class SchedulingConversation
         return remaining;
     }
 
-    private void PreviewMoves(IReadOnlyList<Room> rooms, Func<string, bool, Planner.OverrideProposal> propose,
-        Func<Placement, Room, MeetingTime, bool, Planner.OverrideProposal>? proposeMove)
+    private void PreviewMoves(IReadOnlyList<Room> rooms, Func<string, bool, int?, Planner.OverrideProposal> propose,
+        Func<Placement, Room, MeetingTime, bool, int?, Planner.OverrideProposal>? proposeMove)
     {
         var target = _target!;
         _moveOptions.Clear(); _swapOptions.Clear(); Proposal = null; _selectedOption = 0;
@@ -318,7 +321,7 @@ public sealed partial class SchedulingConversation
             orderby _findSlot && !_timeExplicit && _filters.StartAt == null && _plan.Rules.IsEarlyStart(time),
                 _filters.PreferSmallest ? room.Capacity : occupied, occupied, -_plan.Rules.BuildingPriority.Score(room, time), Equals(time, target.Time) ? 0 : 1, room == target.Room ? 0 : 1,
                 target.Time == null ? 0 : Math.Abs((time.Start - target.Time.Start).TotalMinutes),
-                Math.Abs(room.Capacity - Math.Max(target.Section.SizeForRoom, target.Section.PreferredRoomCapacity)), room.DisplayName
+                Math.Abs(room.Capacity - RoomCapacityTarget(target)), room.DisplayName
             select (time, room)).Take(600).ToList();
         var failures = new List<string>();
         foreach (var (time, room) in combinations)
@@ -328,8 +331,8 @@ public sealed partial class SchedulingConversation
                 string selector = $"{target.Section.Title} / {target.Section.Instructor} / row {target.Section.SourceRow + 1}";
                 if (_filters.DayCount != null && _filters.Days == null && _moveOptions.Any(o =>
                     o.Proposal.ProposedChanges.First(c => c.Placement == target).Time.Pattern == time.Pattern)) continue;
-                var proposal = proposeMove != null ? proposeMove(target, room, time, _oversized) :
-                    propose($"Put {selector} in {room.DisplayName} {time.Pattern} at {time.Clock}", _oversized);
+                var proposal = proposeMove != null ? proposeMove(target, room, time, _oversized, RequestedMinimumSeats) :
+                    propose($"Put {selector} in {room.DisplayName} {time.Pattern} at {time.Clock}", _oversized, RequestedMinimumSeats);
                 if (proposal.ProposedChanges.Count == 0 || _filters.NoDisplacement && proposal.ProposedChanges.Any(c => c.Placement != target)) continue;
                 string label = $"Option {_moveOptions.Count + 1}: {room.DisplayName} ({room.Capacity} seats) · {time} · {proposal.ProposedChanges.Count} section(s) change";
                 _moveOptions.Add((label, proposal));
@@ -350,6 +353,7 @@ public sealed partial class SchedulingConversation
             // Keep explicit user constraints separate from the automatically selected option.
             var first = Proposal.ProposedChanges.First(c => c.Placement == target);
             Reply($"I read this as moving {target.Section.Title} ({target.Section.Instructor}) to {first.Room.DisplayName} ({first.Room.Capacity} seats), {first.Time}. " +
+                (_swapRequested ? "For this capacity request, I searched rooms free at this time and occupied rooms with valid replacement assignments. " : "") +
                 $"I found {_moveOptions.Count} checked option(s), {(_filters.PreferSmallest ? "preferring smaller rooms" : "preferring fewer affected sections")}. {_filters.Describe()} " +
                 (_findSlot && !_timeExplicit && _filters.StartAt == null && _plan.Rules.IsEarlyStart(first.Time) ? "An early start is a fallback: no later start passed this bounded search with your conditions. " : "") +
                 WeeklyHoursNote(Proposal) + " " +

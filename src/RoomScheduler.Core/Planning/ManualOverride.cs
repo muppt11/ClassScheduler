@@ -13,13 +13,15 @@ public partial class Planner
         internal Plan Source { get; init; } = null!;
         internal List<(Placement Placement, Room? Room, MeetingTime? Time)> Snapshot { get; init; } = new();
         internal List<OverrideChange> Changes { get; init; } = new();
+        internal Placement? CapacityTarget { get; init; }
+        internal int? RequestedMinimumSeats { get; init; }
         public IReadOnlyList<OverrideChange> ProposedChanges => Changes.AsReadOnly();
         public string Explanation { get; internal init; } = "";
         internal bool Applied { get; set; }
     }
 
     /// <summary>Deterministic grammar; ambiguous selectors and incomplete times require clarification.</summary>
-    public OverrideProposal ProposeOverride(Plan plan, string request, bool allowOversizedRoom = false)
+    public OverrideProposal ProposeOverride(Plan plan, string request, bool allowOversizedRoom = false, int? requestedMinimumSeats = null)
     {
         var match = Regex.Match(request.Trim().TrimEnd('.'),
             @"^Put\s+(.+?)\s+in\s+([A-Z]+\s+[\w.]+)\s+(.+?)\s+at\s+(.+)$", RegexOptions.IgnoreCase);
@@ -56,15 +58,16 @@ public partial class Planner
         var times = PreferenceParser.FindTimes($"{(clock.Contains('-') ? "" : "at ")}{clock}",
             clock.Contains('-') ? null : target.Time?.Duration, dayList).ToList();
         if (times.Count != 1) throw new ArgumentException("Provide one unambiguous time, preferably with am/pm and an end time.");
-        return ProposeOverride(plan, target, room, times[0].Time, allowOversizedRoom);
+        return ProposeOverride(plan, target, room, times[0].Time, allowOversizedRoom, requestedMinimumSeats);
     }
 
     /// <summary>Typed entry point for generated moves; no day/time string round trip.</summary>
-    public OverrideProposal ProposeOverride(Plan plan, Placement target, Room room, MeetingTime time, bool allowOversizedRoom = false)
+    public OverrideProposal ProposeOverride(Plan plan, Placement target, Room room, MeetingTime time, bool allowOversizedRoom = false, int? requestedMinimumSeats = null)
     {
         if (!plan.Placements.Contains(target) || !_rooms.Contains(room))
             throw new ArgumentException("The course or room is no longer in the current plan; rebuild the proposal.");
         if (target.Section.Online) throw new ArgumentException("Online sections have no physical room to move.");
+        ValidateRequestedCapacity(room, requestedMinimumSeats);
         string request = $"Move {target.Section.Title} to {room.DisplayName}, {time}";
         if (!TimeAllowed(target.Section, time))
         {
@@ -89,7 +92,7 @@ public partial class Planner
             p.Section.Surname == target.Section.Surname && p.Time != null && p.Time.Overlaps(time));
         if (instructorConflict != null)
             throw new ArgumentException($"{target.Section.Instructor} already teaches {instructorConflict.Section.Title} at {instructorConflict.Time}. Choose a different time.");
-        if (Rules.FitIndicator(room.Capacity, target.Section.SizeForRoom) == "Max high" && !allowOversizedRoom)
+        if (Rules.FitIndicator(room.Capacity, Math.Max(target.Section.SizeForRoom, requestedMinimumSeats ?? 0)) == "Max high" && !allowOversizedRoom)
             throw new ArgumentException("This room is much larger than needed. Select the oversized-room exception and preview again to record an intentional exception.");
 
         var all = plan.Placements.Concat(plan.Discussions).ToList();
@@ -163,19 +166,21 @@ public partial class Planner
         return new OverrideProposal
         {
             Source = plan, Snapshot = all.Select(p => (p, p.Room, p.Time)).ToList(), Changes = changes,
-            Explanation = $"Manual request: {request}. " + (allowOversizedRoom ? "Oversized-room exception explicitly allowed. " : "") +
+            CapacityTarget = target, RequestedMinimumSeats = requestedMinimumSeats,
+            Explanation = $"Manual request: {request}. " + RequestedCapacityNote(requestedMinimumSeats) + (allowOversizedRoom ? "Oversized-room exception explicitly allowed. " : "") +
                 (displaced.Count > 0 ? $"All {displaced.Count} directly displaced section(s) have checked replacement rooms and retain their times. All affected room assignments apply together. " : "Displaced sections retain their times. ") +
                 "Review weekly hours and registrar approval before publishing. Rebuild replaces manual overrides."
         };
     }
 
     /// <summary>Exchange rooms, optionally exchanging complete meeting times, with atomic preview/apply.</summary>
-    public OverrideProposal ProposeSwap(Plan plan, Placement first, Placement second, bool swapTimes = false, bool allowOversizedRoom = false)
+    public OverrideProposal ProposeSwap(Plan plan, Placement first, Placement second, bool swapTimes = false, bool allowOversizedRoom = false, int? requestedMinimumSeats = null)
     {
         if (first == second || !plan.Placements.Contains(first) || !plan.Placements.Contains(second) ||
             first.Section.Online || second.Section.Online || first.Room == null || second.Room == null || first.Time == null || second.Time == null)
             throw new ArgumentException("Choose two distinct in-person sections with assigned rooms and times.");
         var all = plan.Placements.Concat(plan.Discussions).ToList();
+        ValidateRequestedCapacity(second.Room, requestedMinimumSeats);
         var copies = all.ToDictionary(p => p, p => new Placement {Section = p.Section, Room = p.Room, Time = p.Time, LectureOf = p.LectureOf});
         copies[first].Room = second.Room; copies[second].Room = first.Room;
         if (swapTimes) { copies[first].Time = second.Time; copies[second].Time = first.Time; }
@@ -190,7 +195,8 @@ public partial class Planner
                 throw new ArgumentException($"Another class still occupies {next.Room!.DisplayName} at {next.Time}; exchanging just these two classes would cause a room conflict.");
             if (InstructorBusy(next, next.Time!, copies.Values.ToList()))
                 throw new ArgumentException($"{next.Section.Instructor} already has another class at {next.Time}; this swap would double-book the instructor.");
-            if (Rules.FitIndicator(next.Room!.Capacity, next.Section.SizeForRoom) == "Max high" && !allowOversizedRoom)
+            int fitSize = original == first ? Math.Max(next.Section.SizeForRoom, requestedMinimumSeats ?? 0) : next.Section.SizeForRoom;
+            if (Rules.FitIndicator(next.Room!.Capacity, fitSize) == "Max high" && !allowOversizedRoom)
                 throw new ArgumentException($"The swap would put {next.Section.Title} in a room much larger than needed. Allow an intentional oversized-room exception to preview it.");
         }
         ValidateAssignmentsPreserved(copies);
@@ -200,9 +206,10 @@ public partial class Planner
         return new OverrideProposal
         {
             Source = plan, Snapshot = all.Select(p => (p, p.Room, p.Time)).ToList(), Changes = changes,
+            CapacityTarget = first, RequestedMinimumSeats = requestedMinimumSeats,
             Explanation = $"Swap {first.Section.Title} with {second.Section.Title}: " +
                 (swapTimes ? "exchange both rooms and meeting times. Check weekly contact hours for both sections. " : "exchange rooms; both sections keep their meeting times. ") +
-                (allowOversizedRoom ? "Oversized-room exception explicitly allowed. " : "") +
+                RequestedCapacityNote(requestedMinimumSeats) + (allowOversizedRoom ? "Oversized-room exception explicitly allowed. " : "") +
                 "Both sections receive checked room assignments, and both changes apply together. " +
                 "All proposed assignments were checked for capacity, room/instructor conflicts, offline rooms, policies and accommodations. Rebuild replaces manual overrides."
         };
@@ -221,6 +228,8 @@ public partial class Planner
         });
         ValidateAssignmentsPreserved(copies);
         ValidateOverride(copies.Values.ToList());
+        if (proposal.CapacityTarget != null)
+            ValidateRequestedCapacity(copies[proposal.CapacityTarget].Room!, proposal.RequestedMinimumSeats);
         foreach (var change in proposal.Changes)
         {
             var p = change.Placement;
@@ -234,6 +243,15 @@ public partial class Planner
         }
         proposal.Applied = true;
     }
+
+    private static void ValidateRequestedCapacity(Room room, int? requestedMinimumSeats)
+    {
+        if (requestedMinimumSeats < 0 || room.Capacity < requestedMinimumSeats)
+            throw new ArgumentException($"The requested room needs at least {requestedMinimumSeats} seats; {room.DisplayName} has {room.Capacity}.");
+    }
+
+    private static string RequestedCapacityNote(int? seats) => seats == null ? "" :
+        $"Requested room minimum: {seats} physical seats. Room fit was checked against that request; expected enrollment is unchanged. ";
 
     // Existing unassigned sections may stay unassigned, but a manual change must
     // never strand a previously assigned lecture or discussion. Check this both

@@ -85,10 +85,10 @@ public sealed partial class SchedulingConversation
     private string GdcChoice => $"CS-controlled GDC hours: from {MeetingTime.ClockTime(_plan!.Rules.CsOwnsGdcFrom)}";
     private static string Description(Placement p) => $"{p.Section.Title} — {p.Section.Instructor} (row {p.Section.SourceRow + 1})";
 
-    public void Send(Planner.Plan? plan, IReadOnlyList<Room> rooms, Func<string, bool, Planner.OverrideProposal> propose,
+    public void Send(Planner.Plan? plan, IReadOnlyList<Room> rooms, Func<string, bool, int?, Planner.OverrideProposal> propose,
                      string message, bool allowOversized = false,
-                     Func<Placement, Room, MeetingTime, bool, Planner.OverrideProposal>? proposeMove = null,
-                     Func<Placement, Placement, bool, bool, Planner.OverrideProposal>? proposeSwap = null)
+                     Func<Placement, Room, MeetingTime, bool, int?, Planner.OverrideProposal>? proposeMove = null,
+                     Func<Placement, Placement, bool, bool, int?, Planner.OverrideProposal>? proposeSwap = null)
     {
         Sync(plan);
         var previousPreview = Proposal?.ProposedChanges.FirstOrDefault(c => c.Placement == _target);
@@ -343,6 +343,14 @@ public sealed partial class SchedulingConversation
         }
         if (_swapRequested)
         {
+            bool exchangeTimes = _swapTimesExplicit ? _swapTimes :
+                (_gdcHours && _target.Time != null && _target.Time.Start < _plan.Rules.CsOwnsGdcFrom) ||
+                (_time != null && !Equals(_time, _target.Time)) || _findSlot;
+            if ((_filters.MinSeats != null || _filters.MaxSeats != null) && !exchangeTimes && _swapPartnerQuery.Length == 0 && _partners.Count == 0)
+            {
+                _findRoom = true; _findSlot = false;
+                PreviewMoves(rooms, propose, proposeMove); return;
+            }
             PreviewSwaps(rooms, proposeSwap); return;
         }
         if (_gdcHours && _time != null && _time.Start < _plan.Rules.CsOwnsGdcFrom)
@@ -372,7 +380,7 @@ public sealed partial class SchedulingConversation
         PreviewMoves(rooms, propose, proposeMove);
     }
 
-    private void PreviewSwaps(IReadOnlyList<Room> rooms, Func<Placement, Placement, bool, bool, Planner.OverrideProposal>? proposeSwap)
+    private void PreviewSwaps(IReadOnlyList<Room> rooms, Func<Placement, Placement, bool, bool, int?, Planner.OverrideProposal>? proposeSwap)
     {
         Proposal = null; _swapOptions.Clear(); _moveOptions.Clear(); _selectedOption = 0;
         if (proposeSwap == null) { Reply("Room-swap support isn't available in this client. Reload the updated app."); return; }
@@ -409,14 +417,14 @@ public sealed partial class SchedulingConversation
             .Where(p => _partners.Count > 0 || p.Room!.Capacity >= Math.Max(_target.Section.SizeForRoom, _target.Section.MinimumRoomCapacity) &&
                 _target.Room.Capacity >= Math.Max(p.Section.SizeForRoom, p.Section.MinimumRoomCapacity))
             .OrderBy(p => _swapTimes && !_timeExplicit && _plan!.Rules.IsEarlyStart(p.Time!))
-            .ThenBy(p => _filters.PreferSmallest ? p.Room!.Capacity : Math.Abs(p.Room!.Capacity - Math.Max(_target.Section.SizeForRoom, _target.Section.PreferredRoomCapacity)))
+            .ThenBy(p => _filters.PreferSmallest ? p.Room!.Capacity : Math.Abs(p.Room!.Capacity - RoomCapacityTarget(_target)))
             .ThenBy(p => p.Section.SourceRow).Take(80).ToList();
         string? error = null;
         foreach (var partner in candidates)
         {
             try
             {
-                var proposal = proposeSwap(_target, partner, _swapTimes, _oversized);
+                var proposal = proposeSwap(_target, partner, _swapTimes, _oversized, RequestedMinimumSeats);
                 if (proposal.ProposedChanges.Count == 0) continue;
                 string label = $"Swap with {Description(partner)} — {partner.Room!.DisplayName} ({partner.Room.Capacity} seats), {partner.Time}";
                 _swapOptions.Add((label, proposal));

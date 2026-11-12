@@ -29,9 +29,10 @@ public partial class SwapTests
         return (planner, plan, rooms, new());
     }
     private static void Send((Planner Planner, Planner.Plan Plan, List<Room> Rooms, SchedulingConversation Chat) f, string text) =>
-        f.Chat.Send(f.Plan, f.Rooms, (s,b) => throw new InvalidOperationException("Generated moves must not use the text parser."), text, false,
-            (p,r,t,b) => f.Planner.ProposeOverride(f.Plan,p,r,t,b),
-            (a,b,t,o) => f.Planner.ProposeSwap(f.Plan,a,b,t,o));
+        f.Chat.Send(f.Plan, f.Rooms, (s,b,seats) => throw new InvalidOperationException("Generated moves must not use the text parser."), text, false,
+            (p,r,t,b,seats) => f.Planner.ProposeOverride(f.Plan,p,r,t,b,seats),
+            (a,b,t,o,seats) => f.Planner.ProposeSwap(f.Plan,a,b,t,o,seats));
+    private static bool IsRoomOption(string label) => label.StartsWith("Option ") || label.StartsWith("Swap with");
     private static string Last(SchedulingConversation chat) => chat.Messages.Last().Text;
     private static void NoConflicts(Planner.Plan plan)
     {
@@ -222,11 +223,12 @@ public partial class SwapTests
     }
 
     [Fact]
-    public void Seat_limit_followup_refines_swap_partners_instead_of_switching_to_a_move()
+    public void Seat_limit_followup_finds_capacity_aware_rooms_and_preserves_meeting_times()
     {
         var f = Fixture(true); Send(f, "swap rooms for comp arch");
         Send(f, "under 45 seats");
-        Assert.NotNull(f.Chat.Proposal); Assert.Contains("room-only swap", Last(f.Chat));
+        Assert.NotNull(f.Chat.Proposal); Assert.Contains("For this capacity request", Last(f.Chat));
+        Assert.All(f.Chat.Proposal!.ProposedChanges, c => Assert.Equal(c.BeforeTime, c.Time));
         Assert.Equal(2, f.Chat.Proposal!.ProposedChanges.Count);
         var change = f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement.Section.Course == "429");
         Assert.Equal(f.Rooms[2], change.Room);
@@ -261,7 +263,7 @@ public partial class SwapTests
         Send(f, request);
         Assert.True(f.Chat.Proposal != null, Last(f.Chat));
         Assert.Equal(expectedCapacity, f.Chat.Proposal!.ProposedChanges.Single(c => c.Placement == f.Plan.Placements[0]).Room.Capacity);
-        Assert.Single(f.Chat.Suggestions, s => s.StartsWith("Swap with"));
+        Assert.Single(f.Chat.Suggestions, IsRoomOption);
         Assert.Equal(f.Rooms[0], f.Plan.Placements[0].Room);
     }
 
