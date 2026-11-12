@@ -52,7 +52,7 @@ namespace RoomScheduler
 
         public bool BuildingOffline(string building) => Buildings.Contains(building);
 
-        /// <summary>Checking a building takes every room in it offline; unchecking brings them all back.</summary>
+        /// <summary>Set every room in a building offline or available, clearing individual exceptions.</summary>
         public void SetBuilding(string building, bool offline, IEnumerable<Room> allRooms)
         {
             var inBuilding = allRooms.Where(r => r.Building.Equals(building, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -64,7 +64,7 @@ namespace RoomScheduler
 
         /// <summary>
         /// One room. Bringing a room back in an offline building turns the building
-        /// check off and keeps its other rooms offline one by one.
+        /// offline marker off and keeps its other rooms offline one by one.
         /// </summary>
         public void SetRoom(Room room, bool offline, IEnumerable<Room> allRooms)
         {
@@ -78,7 +78,7 @@ namespace RoomScheduler
             if (offline) Rooms.Add(room.DisplayName);
             else Rooms.Remove(room.DisplayName);
 
-            // Every room in the building checked one by one = the building is offline.
+            // Every room in the building taken offline individually = the building is offline.
             var inBuilding = allRooms.Where(r => r.Building.Equals(room.Building, StringComparison.OrdinalIgnoreCase)).ToList();
             if (inBuilding.Count > 0 && inBuilding.All(r => Rooms.Contains(r.DisplayName)))
             {

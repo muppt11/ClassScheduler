@@ -1,5 +1,6 @@
 @page "/rooms"
 @inject PlanningService Planning
+@inject IJSRuntime JS
 
 <PageTitle>Rooms</PageTitle>
 
@@ -41,9 +42,11 @@
     @if (_addedMessage != null) { <p class="summary" role="status">@_addedMessage</p> }
 </details>
 
-<h2>Offline</h2>
+<h2>Room availability</h2>
 <p class="explain">
-    Check a building to take every room in it offline, or open it to pick single rooms.
+    Checked rooms are available; unchecked rooms are offline.
+    Check a building to enable all its rooms, or uncheck it to take them all offline.
+    Open a building to choose individual rooms. A dash means some rooms are available.
     The scheduler never puts a class in an offline room.
 </p>
 
@@ -57,16 +60,16 @@
     {
         var rooms = RoomsIn(b);
         int off = rooms.Count(Offline);
-        bool whole = Planning.Rules.Offline.BuildingOffline(b);
+        bool partial = off > 0 && off < rooms.Count;
         <div class="bldg @(off > 0 ? "has-off" : "")">
             <div class="bldg-head">
                 <label class="inline">
-                    <input type="checkbox" checked="@whole" @onchange="e => SetBuilding(b, (bool)e.Value!)" />
+                    <input type="checkbox" @ref="_buildingCheckboxes[b]" checked="@(off == 0)" aria-label="@($"Available rooms in {b}")" aria-checked="@(partial ? "mixed" : off == 0 ? "true" : "false")" @onchange="e => SetBuilding(b, (bool)e.Value!)" />
                     <b class="mono">@b</b>
                     <span class="dim">@Planning.Campus.Names.GetValueOrDefault(b, "")</span>
                 </label>
                 <span class="summary">
-                    @(off == 0 ? $"{rooms.Count} rooms" : off == rooms.Count ? $"all {rooms.Count} offline" : $"{off} of {rooms.Count} offline")
+                    @(off == 0 ? $"all {rooms.Count} available" : off == rooms.Count ? $"all {rooms.Count} offline" : $"{rooms.Count - off} available, {off} offline")
                 </span>
                 <button class="ghost small" @onclick="() => Toggle(b)">@(_open.Contains(b) ? "hide rooms" : "rooms")</button>
             </div>
@@ -76,7 +79,7 @@
                     @foreach (var r in rooms)
                     {
                         <label class="inline">
-                            <input type="checkbox" checked="@Offline(r)" @onchange="e => SetRoom(r, (bool)e.Value!)" />
+                            <input type="checkbox" checked="@(!Offline(r))" aria-label="@($"Available: {r.DisplayName}")" @onchange="e => SetRoom(r, (bool)e.Value!)" />
                             <span class="mono">@r.RoomNumber</span> <span class="dim">(@r.Capacity)</span>
                         </label>
                     }
@@ -112,7 +115,7 @@
                 <td class="num">@r.Capacity</td>
                 <td class="mono">@string.Join(" ", r.Features.OrderBy(f => f))</td>
                 <td>@(r.LectureCapture ? "yes" : "")</td>
-                <td>@(Offline(r) ? "offline" : r.NonStandard ? "avoid (NSC)" : r.DepartmentOnly ? "CS only" : "")</td>
+                <td>@(Offline(r) ? "offline" : r.NonStandard ? "avoid (NSC)" : r.DepartmentOnly ? "CS only" : "available")</td>
                 <td class="num">@(classes > 0 ? classes : "")</td>
                 <td class="num" title="@string.Join("; ", Planning.Past.InRoom(r.DisplayName).Select(s => $"{s.Semester}: {s.Course} {s.Title}{(s.Hybrid ? " (hybrid)" : "")}"))">@(Planning.Past.InRoom(r.DisplayName).Count is int n && n > 0 ? n : "")</td>
                 <td class="dim">@r.Notes</td>
@@ -148,7 +151,7 @@
                 _newCapture, _newDepartmentOnly, _newNotes);
             _filter = room.DisplayName; _onlyUsed = false; _open.Add(room.Building);
             _addedMessage = $"Saved {room.DisplayName} ({room.Capacity} seats). " +
-                (Offline(room) ? "This room is offline; enable it in the Offline list before scheduling. " : "") +
+                (Offline(room) ? "This room is offline; check it under Room availability before scheduling. " : "") +
                 (Planning.LatestPlan != null ? "Rebuild on Semester plan to use it." : "It is available for your next schedule.");
             _newBuilding = room.Building; _newNumber = ""; _newCapacity = null;
             _newFeatures = _newNotes = ""; _newCapture = _newDepartmentOnly = false;
@@ -160,6 +163,17 @@
     private bool _onlyUsed;
     private bool _changed;
     private readonly HashSet<string> _open = new();
+    private readonly Dictionary<string, ElementReference> _buildingCheckboxes = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        foreach (var building in Buildings())
+        {
+            var rooms = RoomsIn(building);
+            int offline = rooms.Count(Offline);
+            await JS.InvokeVoidAsync("setRoomAvailabilityMixed", _buildingCheckboxes[building], offline > 0 && offline < rooms.Count);
+        }
+    }
 
     private bool Offline(Room r) => Planning.Rules.Offline.IsOffline(r);
 
@@ -174,15 +188,15 @@
         if (!_open.Remove(b)) _open.Add(b);
     }
 
-    private void SetBuilding(string b, bool offline)
+    private void SetBuilding(string b, bool available)
     {
-        Planning.Rules.Offline.SetBuilding(b, offline, Planning.Rooms);
+        Planning.Rules.Offline.SetBuilding(b, !available, Planning.Rooms);
         _changed = true;
     }
 
-    private void SetRoom(Room r, bool offline)
+    private void SetRoom(Room r, bool available)
     {
-        Planning.Rules.Offline.SetRoom(r, offline, Planning.Rooms);
+        Planning.Rules.Offline.SetRoom(r, !available, Planning.Rooms);
         _changed = true;
     }
 

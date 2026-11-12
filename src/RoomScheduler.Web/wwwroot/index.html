@@ -43,6 +43,7 @@
             };
         })();
         window.scrollChatToBottom = element => { element.scrollTop = element.scrollHeight; };
+        window.setRoomAvailabilityMixed = (checkbox, mixed) => { checkbox.indeterminate = mixed; };
         // Give every export and uploaded-file download a timestamp and unique suffix.
         window.saveFile = (name, base64, type) => {
             const link = document.createElement("a");

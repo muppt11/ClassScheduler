@@ -37,7 +37,9 @@ run `dotnet run --project src/RoomScheduler.Web`, and open the address it prints
 
    The app checks each file's contents, so a file added under the wrong step still goes to
    the right one. Files stay in this browser for next time.
-2. **Rooms → Offline.** Check any building or room that's off limits. CPE starts checked.
+2. **Rooms → Room availability.** Checked rooms are available; unchecked rooms are offline.
+   Check or uncheck a building to enable or disable all its rooms. A dash means only some
+   rooms are available. CPE starts unchecked (offline). Existing offline choices are preserved.
    Use **Add a room** on the Rooms page to enter its building code, room number and seat capacity,
    with optional features, lecture capture, CS-only status and notes. Added rooms stay saved in this
    browser and survive room-table and lecture-capture-list uploads. Duplicate room names and invalid
