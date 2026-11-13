@@ -409,8 +409,10 @@ section's current meeting time, including rooms with no assignments and rooms us
 times. Free rooms are preferred. Occupied rooms are offered only when every displaced class has
 a checked replacement; all moves remain a preview until Apply. A requested capacity never lowers
 the physical capacity needed for the actual class or bypasses offline or accommodation requirements.
-Use `0–300 seats` (or `from 0 to 300 seats`) for the broader range. Zero means no additional
-minimum; it does not allow rooms that are too small for the class. Rooms above 300 are excluded.
+Range endpoints are supplied by the user, not fixed buckets: `0–40 seats`, `37–93 seats`,
+`100–300 seats`, or any other nonnegative whole-number bounds supported by the room inventory.
+Zero means no additional minimum; it does not allow rooms that are too small for the class.
+Rooms outside the requested bounds are excluded.
 You can also say `a room that holds seventy people`, `120-seat room`, `up to 150 seats`,
 or `between sixty-five and seventy-five students`. A follow-up such as `actually make it 100`
 replaces the old seat requirement while keeping the course and swap type. Say `don't change

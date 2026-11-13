@@ -87,6 +87,33 @@ public class CapacityRoomSearchTests
     }
 
     [Theory]
+    [InlineData("0–40", 40, true)]
+    [InlineData("0–40", 41, false)]
+    [InlineData("0–40", 29, false)]
+    [InlineData("37–93", 37, true)]
+    [InlineData("37–93", 93, true)]
+    [InlineData("37–93", 36, false)]
+    [InlineData("37–93", 94, false)]
+    [InlineData("100–300", 250, true)]
+    [InlineData("200–500", 500, true)]
+    [InlineData("999–1234", 1234, true)]
+    public void User_supplied_range_endpoints_are_not_hardcoded(string range, int capacity, bool available)
+    {
+        var f = Fixture();
+        f.Rooms[1].Capacity = capacity;
+        foreach (var room in f.Rooms.Skip(2)) f.Planner.Rules.Offline.SetRoom(room, true, f.Rooms);
+        Send(f, $"find room swaps for 104C with {range} seats");
+        Assert.Equal(available, f.Chat.Proposal != null);
+        Assert.Equal(30, f.Plan.Placements[0].Section.SizeForRoom);
+        if (available)
+        {
+            Assert.Equal(f.Rooms[1], Assert.Single(f.Chat.Proposal!.ProposedChanges).Room);
+            f.Planner.ApplyOverride(f.Plan, f.Chat.Proposal);
+            AssertNoConflicts(f.Plan);
+        }
+    }
+
+    [Theory]
     [InlineData("from 0 to 300 seats")]
     [InlineData("between zero and three hundred seats")]
     [InlineData("0-300 seats")]
