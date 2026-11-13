@@ -9,7 +9,7 @@
     <p class="hint">Ask about your schedule, compare rooms and times, or explore swaps. Every proposed change is checked before you review and apply it.</p>
     <div class="chat-history" @ref="_chatLog" role="log" aria-live="polite" aria-label="Scheduling assistant conversation">
         <div class="chat-message assistant-message"><b>Assistant</b><p>Tell me what you want to improve. For example: “Find comp arch a slot in GDC after 2pm, no Fridays”,
-            “Make comp arch one day a week”, “Move it to Friday afternoon”, “Find a smaller room but keep the same time”, or “Swap rooms for comp arch with data structures”.
+            “Make comp arch one day a week”, “Move it to Friday afternoon”, “Find comp arch a room with 0–300 seats and keep the same time”, or “Swap rooms for comp arch with data structures”.
             I can compare rooms by capacity and availability, find the smallest feasible room, remember your follow-up conditions, and explain who would move. You approve the preview before anything changes. Try “Set 103F minimum seats to 40 and preferred seats to 60” to review a semester baseline, or “Prioritize GDC, then RLP, between 9:30am and 5pm” or “How full is GDC?” Ask “Which files are active?” or “Review file updates” to check newer uploads and confirm a rebuild.</p></div>
         @foreach (var message in _chatMessages)
         {

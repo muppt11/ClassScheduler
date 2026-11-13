@@ -29,9 +29,9 @@ public class SectionTimingReferenceTests
     }
 
     private static void Send((Planner Planner, Planner.Plan Plan, List<Room> Rooms, SchedulingConversation Chat) f, string text) =>
-        f.Chat.Send(f.Plan, f.Rooms, (s, b, seats) => f.Planner.ProposeOverride(f.Plan, s, b, seats), text, false,
-            (p, r, t, b, seats) => f.Planner.ProposeOverride(f.Plan, p, r, t, b, seats),
-            (a, b, t, o, seats) => f.Planner.ProposeSwap(f.Plan, a, b, t, o, seats));
+        f.Chat.Send(f.Plan, f.Rooms, (s, b, seats, maximum) => f.Planner.ProposeOverride(f.Plan, s, b, seats, maximum), text, false,
+            (p, r, t, b, seats, maximum) => f.Planner.ProposeOverride(f.Plan, p, r, t, b, seats, maximum),
+            (a, b, t, o, seats, maximum) => f.Planner.ProposeSwap(f.Plan, a, b, t, o, seats, maximum));
 
     [Theory]
     [InlineData("can you swap rooms for CS 312 (TTH 2 - 3:30pm) and CS 313E (TTH 2 - 3:30P)?")]

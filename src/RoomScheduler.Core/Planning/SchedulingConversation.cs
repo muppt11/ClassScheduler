@@ -85,10 +85,10 @@ public sealed partial class SchedulingConversation
     private string GdcChoice => $"CS-controlled GDC hours: from {MeetingTime.ClockTime(_plan!.Rules.CsOwnsGdcFrom)}";
     private static string Description(Placement p) => $"{p.Section.Title} — {p.Section.Instructor} (row {p.Section.SourceRow + 1})";
 
-    public void Send(Planner.Plan? plan, IReadOnlyList<Room> rooms, Func<string, bool, int?, Planner.OverrideProposal> propose,
+    public void Send(Planner.Plan? plan, IReadOnlyList<Room> rooms, Func<string, bool, int?, int?, Planner.OverrideProposal> propose,
                      string message, bool allowOversized = false,
-                     Func<Placement, Room, MeetingTime, bool, int?, Planner.OverrideProposal>? proposeMove = null,
-                     Func<Placement, Placement, bool, bool, int?, Planner.OverrideProposal>? proposeSwap = null)
+                     Func<Placement, Room, MeetingTime, bool, int?, int?, Planner.OverrideProposal>? proposeMove = null,
+                     Func<Placement, Placement, bool, bool, int?, int?, Planner.OverrideProposal>? proposeSwap = null)
     {
         Sync(plan);
         var previousPreview = Proposal?.ProposedChanges.FirstOrDefault(c => c.Placement == _target);
@@ -380,7 +380,7 @@ public sealed partial class SchedulingConversation
         PreviewMoves(rooms, propose, proposeMove);
     }
 
-    private void PreviewSwaps(IReadOnlyList<Room> rooms, Func<Placement, Placement, bool, bool, int?, Planner.OverrideProposal>? proposeSwap)
+    private void PreviewSwaps(IReadOnlyList<Room> rooms, Func<Placement, Placement, bool, bool, int?, int?, Planner.OverrideProposal>? proposeSwap)
     {
         Proposal = null; _swapOptions.Clear(); _moveOptions.Clear(); _selectedOption = 0;
         if (proposeSwap == null) { Reply("Room-swap support isn't available in this client. Reload the updated app."); return; }
@@ -424,7 +424,7 @@ public sealed partial class SchedulingConversation
         {
             try
             {
-                var proposal = proposeSwap(_target, partner, _swapTimes, _oversized, RequestedMinimumSeats);
+                var proposal = proposeSwap(_target, partner, _swapTimes, _oversized, RequestedMinimumSeats, RequestedMaximumSeats);
                 if (proposal.ProposedChanges.Count == 0) continue;
                 string label = $"Swap with {Description(partner)} — {partner.Room!.DisplayName} ({partner.Room.Capacity} seats), {partner.Time}";
                 _swapOptions.Add((label, proposal));

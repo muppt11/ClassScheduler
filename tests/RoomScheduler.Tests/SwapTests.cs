@@ -29,9 +29,9 @@ public partial class SwapTests
         return (planner, plan, rooms, new());
     }
     private static void Send((Planner Planner, Planner.Plan Plan, List<Room> Rooms, SchedulingConversation Chat) f, string text) =>
-        f.Chat.Send(f.Plan, f.Rooms, (s,b,seats) => throw new InvalidOperationException("Generated moves must not use the text parser."), text, false,
-            (p,r,t,b,seats) => f.Planner.ProposeOverride(f.Plan,p,r,t,b,seats),
-            (a,b,t,o,seats) => f.Planner.ProposeSwap(f.Plan,a,b,t,o,seats));
+        f.Chat.Send(f.Plan, f.Rooms, (s,b,seats,maximum) => throw new InvalidOperationException("Generated moves must not use the text parser."), text, false,
+            (p,r,t,b,seats,maximum) => f.Planner.ProposeOverride(f.Plan,p,r,t,b,seats,maximum),
+            (a,b,t,o,seats,maximum) => f.Planner.ProposeSwap(f.Plan,a,b,t,o,seats,maximum));
     private static bool IsRoomOption(string label) => label.StartsWith("Option ") || label.StartsWith("Swap with");
     private static string Last(SchedulingConversation chat) => chat.Messages.Last().Text;
     private static void NoConflicts(Planner.Plan plan)

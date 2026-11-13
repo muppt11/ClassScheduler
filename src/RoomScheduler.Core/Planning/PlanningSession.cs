@@ -483,12 +483,12 @@ namespace RoomScheduler
             return _planner;
         }
 
-        public Planner.OverrideProposal ProposeOverride(string request, bool allowOversizedRoom, int? requestedMinimumSeats = null) =>
-            CurrentPlanner().ProposeOverride(LatestPlan!, request, allowOversizedRoom, requestedMinimumSeats);
-        public Planner.OverrideProposal ProposeMove(Placement target, Room room, MeetingTime time, bool allowOversizedRoom, int? requestedMinimumSeats = null) =>
-            CurrentPlanner().ProposeOverride(LatestPlan!, target, room, time, allowOversizedRoom, requestedMinimumSeats);
-        public Planner.OverrideProposal ProposeSwap(Placement first, Placement second, bool swapTimes, bool allowOversizedRoom, int? requestedMinimumSeats = null) =>
-            CurrentPlanner().ProposeSwap(LatestPlan!, first, second, swapTimes, allowOversizedRoom, requestedMinimumSeats);
+        public Planner.OverrideProposal ProposeOverride(string request, bool allowOversizedRoom, int? requestedMinimumSeats = null, int? requestedMaximumSeats = null) =>
+            CurrentPlanner().ProposeOverride(LatestPlan!, request, allowOversizedRoom, requestedMinimumSeats, requestedMaximumSeats);
+        public Planner.OverrideProposal ProposeMove(Placement target, Room room, MeetingTime time, bool allowOversizedRoom, int? requestedMinimumSeats = null, int? requestedMaximumSeats = null) =>
+            CurrentPlanner().ProposeOverride(LatestPlan!, target, room, time, allowOversizedRoom, requestedMinimumSeats, requestedMaximumSeats);
+        public Planner.OverrideProposal ProposeSwap(Placement first, Placement second, bool swapTimes, bool allowOversizedRoom, int? requestedMinimumSeats = null, int? requestedMaximumSeats = null) =>
+            CurrentPlanner().ProposeSwap(LatestPlan!, first, second, swapTimes, allowOversizedRoom, requestedMinimumSeats, requestedMaximumSeats);
         public void ApplyOverride(Planner.OverrideProposal proposal) =>
             CurrentPlanner().ApplyOverride(LatestPlan!, proposal);
 

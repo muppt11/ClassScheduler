@@ -375,10 +375,12 @@ Apply rechecks the entire proposed schedule and rejects stale previews. No exter
 feed exists: availability here means the uploaded/planned schedule and configured offline rooms.
 Weekly-hour exceptions and registrar permission before CS-controlled GDC hours still require review.
 An explicit seat minimum is used to check the requested room fit, without changing the class's
-expected enrollment. For example, a 30-student class can request an 80-seat room. Rooms substantially
-larger than both the enrollment and the requested minimum still require the per-request oversized-room
-exception checkbox. The requested minimum applies only to the target course; a named swap partner
-keeps its own size and fit checks. No course-specific exceptions are hard-coded.
+expected enrollment. For example, a 30-student class can request an 80-seat room. An explicit upper
+bound, such as `0–300 seats`, permits any room in that range that is large enough for the actual class.
+Both bounds are checked again before Apply. Without an upper bound, rooms substantially larger than
+both enrollment and the requested minimum still require the oversized-room exception checkbox.
+The requested range applies only to the target course; a named swap partner keeps its own size
+and fit checks. No course-specific exceptions are hard-coded.
 Approved moves are marked for review and appear in exports. Rebuild/page reload replaces them.
 
 The chatbot also supports `swap rooms for comp arch with data structures` and contextual follow-ups
@@ -407,6 +409,8 @@ section's current meeting time, including rooms with no assignments and rooms us
 times. Free rooms are preferred. Occupied rooms are offered only when every displaced class has
 a checked replacement; all moves remain a preview until Apply. A requested capacity never lowers
 the physical capacity needed for the actual class or bypasses offline or accommodation requirements.
+Use `0–300 seats` (or `from 0 to 300 seats`) for the broader range. Zero means no additional
+minimum; it does not allow rooms that are too small for the class. Rooms above 300 are excluded.
 You can also say `a room that holds seventy people`, `120-seat room`, `up to 150 seats`,
 or `between sixty-five and seventy-five students`. A follow-up such as `actually make it 100`
 replaces the old seat requirement while keeping the course and swap type. Say `don't change

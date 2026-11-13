@@ -36,9 +36,9 @@ public class CapacityRoomSearchTests
     }
 
     private static void Send((Planner Planner, Planner.Plan Plan, List<Room> Rooms, SchedulingConversation Chat) f, string message) =>
-        f.Chat.Send(f.Plan, f.Rooms, (text, allow, seats) => f.Planner.ProposeOverride(f.Plan, text, allow, seats), message, false,
-            (p, room, time, allow, seats) => f.Planner.ProposeOverride(f.Plan, p, room, time, allow, seats),
-            (a, b, times, allow, seats) => f.Planner.ProposeSwap(f.Plan, a, b, times, allow, seats));
+        f.Chat.Send(f.Plan, f.Rooms, (text, allow, seats, maximum) => f.Planner.ProposeOverride(f.Plan, text, allow, seats, maximum), message, false,
+            (p, room, time, allow, seats, maximum) => f.Planner.ProposeOverride(f.Plan, p, room, time, allow, seats, maximum),
+            (a, b, times, allow, seats, maximum) => f.Planner.ProposeSwap(f.Plan, a, b, times, allow, seats, maximum));
 
     private static void AssertNoConflicts(Planner.Plan plan)
     {
@@ -52,6 +52,81 @@ public class CapacityRoomSearchTests
                 Assert.NotEqual(p.Section.Surname, other.Section.Surname);
             }
         }
+    }
+
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(29, false)]
+    [InlineData(30, true)]
+    [InlineData(80, true)]
+    [InlineData(150, true)]
+    [InlineData(299, true)]
+    [InlineData(300, true)]
+    [InlineData(301, false)]
+    public void Zero_to_300_range_accepts_large_rooms_but_respects_enrollment_and_upper_limit(int capacity, bool available)
+    {
+        var f = Fixture();
+        f.Rooms[1].Capacity = capacity;
+        foreach (var room in f.Rooms.Skip(2)) f.Planner.Rules.Offline.SetRoom(room, true, f.Rooms);
+        Send(f, "find room swaps for 104C with 0–300 seats");
+        Assert.Contains("at least 0 seats", f.Chat.RequestContext!);
+        Assert.Contains("at most 300 seats", f.Chat.RequestContext!);
+        if (!available)
+        {
+            Assert.Null(f.Chat.Proposal);
+            Assert.Equal(f.Rooms[0], f.Plan.Placements[0].Room);
+            return;
+        }
+        Assert.True(f.Chat.Proposal != null, f.Chat.Messages.Last().Text);
+        var change = Assert.Single(f.Chat.Proposal!.ProposedChanges);
+        Assert.Equal(f.Rooms[1], change.Room);
+        Assert.Equal(30, change.Placement.Section.SizeForRoom);
+        Assert.Equal(change.BeforeTime, change.Time);
+        f.Planner.ApplyOverride(f.Plan, f.Chat.Proposal);
+        AssertNoConflicts(f.Plan);
+    }
+
+    [Theory]
+    [InlineData("from 0 to 300 seats")]
+    [InlineData("between zero and three hundred seats")]
+    [InlineData("0-300 seats")]
+    public void Zero_to_300_range_wording_can_preview_a_300_seat_room(string range)
+    {
+        var f = Fixture();
+        f.Rooms[1].Capacity = 300;
+        f.Chat.Send(f.Plan, f.Rooms, (text, allow, minimum, maximum) => f.Planner.ProposeOverride(f.Plan, text, allow, minimum, maximum),
+            "find 104C a room with " + range + " in GDC 2.200");
+        Assert.True(f.Chat.Proposal != null, f.Chat.Messages.Last().Text);
+        Assert.Equal(300, Assert.Single(f.Chat.Proposal!.ProposedChanges).Room.Capacity);
+    }
+
+    [Fact]
+    public void Upper_capacity_bound_is_rechecked_before_apply()
+    {
+        var f = Fixture();
+        f.Rooms[1].Capacity = 300;
+        var target = f.Plan.Placements[0];
+        var proposal = f.Planner.ProposeOverride(f.Plan, target, f.Rooms[1], target.Time!,
+            requestedMinimumSeats: 0, requestedMaximumSeats: 300);
+        f.Rooms[1].Capacity = 301;
+        Assert.Throws<ArgumentException>(() => f.Planner.ApplyOverride(f.Plan, proposal));
+        Assert.Equal(f.Rooms[0], target.Room);
+    }
+
+    [Fact]
+    public void Explicit_range_applies_to_the_requested_course_without_relaxing_partner_fit()
+    {
+        var f = Fixture("same-time");
+        f.Rooms[0].Capacity = 150;
+        f.Rooms[1].Capacity = 300;
+        Assert.Throws<ArgumentException>(() => f.Planner.ProposeSwap(f.Plan, f.Plan.Placements[0], f.Plan.Placements[1],
+            requestedMinimumSeats: 0, requestedMaximumSeats: 300));
+        f.Rooms[0].Capacity = 70;
+        var proposal = f.Planner.ProposeSwap(f.Plan, f.Plan.Placements[0], f.Plan.Placements[1],
+            requestedMinimumSeats: 0, requestedMaximumSeats: 300);
+        f.Planner.ApplyOverride(f.Plan, proposal);
+        Assert.Equal(300, f.Plan.Placements[0].Room!.Capacity);
+        AssertNoConflicts(f.Plan);
     }
 
     [Theory]
@@ -144,7 +219,7 @@ public class CapacityRoomSearchTests
     public void Text_proposal_fallback_uses_the_same_requested_capacity_and_keeps_actual_enrollment()
     {
         var f = Fixture();
-        f.Chat.Send(f.Plan, f.Rooms, (text, oversized, seats) => f.Planner.ProposeOverride(f.Plan, text, oversized, seats),
+        f.Chat.Send(f.Plan, f.Rooms, (text, oversized, seats, maximum) => f.Planner.ProposeOverride(f.Plan, text, oversized, seats, maximum),
             "find 104C a room with 80–120 seats");
         Assert.True(f.Chat.Proposal != null, f.Chat.Messages.Last().Text);
         var change = Assert.Single(f.Chat.Proposal!.ProposedChanges);

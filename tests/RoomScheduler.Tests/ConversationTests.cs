@@ -30,9 +30,9 @@ public partial class ConversationTests
         return (new(), planner, plan, rooms);
     }
     private static void Send((SchedulingConversation Chat, Planner Planner, Planner.Plan Plan, List<Room> Rooms) f, string text, bool allow = false) =>
-        f.Chat.Send(f.Plan, f.Rooms, (s, b, seats) => f.Planner.ProposeOverride(f.Plan, s, b, seats), text, allow,
-            (target, room, time, b, seats) => f.Planner.ProposeOverride(f.Plan, target, room, time, b, seats),
-            (first, second, times, b, seats) => f.Planner.ProposeSwap(f.Plan, first, second, times, b, seats));
+        f.Chat.Send(f.Plan, f.Rooms, (s, b, seats, maximum) => f.Planner.ProposeOverride(f.Plan, s, b, seats, maximum), text, allow,
+            (target, room, time, b, seats, maximum) => f.Planner.ProposeOverride(f.Plan, target, room, time, b, seats, maximum),
+            (first, second, times, b, seats, maximum) => f.Planner.ProposeSwap(f.Plan, first, second, times, b, seats, maximum));
     private static string Last(SchedulingConversation chat) => chat.Messages.Last().Text;
 
     [Fact]

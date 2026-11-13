@@ -14,6 +14,7 @@ public sealed partial class SchedulingConversation
     private Room? _availabilityRoom;
     private bool _availabilitySearch;
     private int? RequestedMinimumSeats => _filters.MinSeats is >= 0 and <= int.MaxValue ? (int?)_filters.MinSeats : null;
+    private int? RequestedMaximumSeats => _filters.MaxSeats is >= 0 and <= int.MaxValue ? (int?)_filters.MaxSeats : null;
     private int RoomCapacityTarget(Placement target) => Math.Max(target.Section.SizeForRoom,
         RequestedMinimumSeats ?? target.Section.PreferredRoomCapacity);
     public string? RequestContext => _target == null ? null :
@@ -285,8 +286,8 @@ public sealed partial class SchedulingConversation
         return remaining;
     }
 
-    private void PreviewMoves(IReadOnlyList<Room> rooms, Func<string, bool, int?, Planner.OverrideProposal> propose,
-        Func<Placement, Room, MeetingTime, bool, int?, Planner.OverrideProposal>? proposeMove)
+    private void PreviewMoves(IReadOnlyList<Room> rooms, Func<string, bool, int?, int?, Planner.OverrideProposal> propose,
+        Func<Placement, Room, MeetingTime, bool, int?, int?, Planner.OverrideProposal>? proposeMove)
     {
         var target = _target!;
         _moveOptions.Clear(); _swapOptions.Clear(); Proposal = null; _selectedOption = 0;
@@ -331,8 +332,8 @@ public sealed partial class SchedulingConversation
                 string selector = $"{target.Section.Title} / {target.Section.Instructor} / row {target.Section.SourceRow + 1}";
                 if (_filters.DayCount != null && _filters.Days == null && _moveOptions.Any(o =>
                     o.Proposal.ProposedChanges.First(c => c.Placement == target).Time.Pattern == time.Pattern)) continue;
-                var proposal = proposeMove != null ? proposeMove(target, room, time, _oversized, RequestedMinimumSeats) :
-                    propose($"Put {selector} in {room.DisplayName} {time.Pattern} at {time.Clock}", _oversized, RequestedMinimumSeats);
+                var proposal = proposeMove != null ? proposeMove(target, room, time, _oversized, RequestedMinimumSeats, RequestedMaximumSeats) :
+                    propose($"Put {selector} in {room.DisplayName} {time.Pattern} at {time.Clock}", _oversized, RequestedMinimumSeats, RequestedMaximumSeats);
                 if (proposal.ProposedChanges.Count == 0 || _filters.NoDisplacement && proposal.ProposedChanges.Any(c => c.Placement != target)) continue;
                 string label = $"Option {_moveOptions.Count + 1}: {room.DisplayName} ({room.Capacity} seats) · {time} · {proposal.ProposedChanges.Count} section(s) change";
                 _moveOptions.Add((label, proposal));
